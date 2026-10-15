@@ -42,6 +42,7 @@
 #include "util/compiler.h"
 #include "util/libsync.h"
 #include "util/os_file.h"
+#include "util/os_misc.h"
 
 #include "main/glconfig.h"
 #include "egl_dri2.h"
@@ -1118,6 +1119,7 @@ droid_open_device(_EGLDisplay *disp, bool swrast)
 
    char *vendor_name = NULL;
    char vendor_buf[PROPERTY_VALUE_MAX];
+   const char *render_node = os_get_option("MESA_DRM_RENDER_NODE");
 
 #ifdef EGL_FORCE_RENDERNODE
    const unsigned node_type = DRM_NODE_RENDER;
@@ -1136,6 +1138,14 @@ droid_open_device(_EGLDisplay *disp, bool swrast)
       assert(device);
 
       if (!(device->available_nodes & (1 << node_type)))
+         goto next;
+
+      /* The render node identifies the device even if the primary node is
+       * the one that gets opened.
+       */
+      if (render_node &&
+          (!(device->available_nodes & (1 << DRM_NODE_RENDER)) ||
+           strcmp(device->nodes[DRM_NODE_RENDER], render_node) != 0))
          goto next;
 
       dri2_dpy->fd_render_gpu = loader_open_device(device->nodes[node_type]);
@@ -1178,7 +1188,7 @@ droid_open_device(_EGLDisplay *disp, bool swrast)
 
    if (dri2_dpy->fd_render_gpu < 0) {
       _eglLog(_EGL_WARNING, "Failed to open %s DRM device",
-              vendor_name ? "desired" : "any");
+              (vendor_name || render_node) ? "desired" : "any");
       return EGL_FALSE;
    }
 
