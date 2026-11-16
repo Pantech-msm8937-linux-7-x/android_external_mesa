@@ -2788,8 +2788,10 @@ tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
    uint32_t pitch = src_width * block_size;
    uint32_t layer_size = src_height * pitch;
 
+   uint32_t dst_plane = tu6_plane_index(dst_image->vk.format,
+                                        info->imageSubresource.aspectMask);
    ops->setup(cmd, cs, src_format, dst_format,
-              info->imageSubresource.aspectMask, blit_param, false, dst_image->layout[0].ubwc,
+              info->imageSubresource.aspectMask, blit_param, false, dst_image->layout[dst_plane].ubwc,
               (VkSampleCountFlagBits) dst_image->layout[0].nr_samples,
               (VkSampleCountFlagBits) dst_image->layout[0].nr_samples);
 
