@@ -807,6 +807,7 @@ tu_get_features(struct tu_physical_device *pdevice,
       features->variablePointers = true;
       features->globalPriorityQuery = true;
       features->samplerFilterMinmax = true;
+      features->vertexPipelineStoresAndAtomics = true;
    }
 }
 
