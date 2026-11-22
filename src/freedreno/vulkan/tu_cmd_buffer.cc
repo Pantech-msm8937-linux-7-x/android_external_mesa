@@ -4303,6 +4303,9 @@ tu_CmdExecuteCommands(VkCommandBuffer commandBuffer,
           VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
          assert(tu_cs_is_empty(&secondary->cs));
 
+         if (tu_is_a5xx(cmd->device))
+            tu5_write_view_bases(cmd, &cmd->draw_cs);
+
          result = tu_cs_add_entries(&cmd->draw_cs, &secondary->draw_cs);
          if (result != VK_SUCCESS) {
             vk_command_buffer_set_error(&cmd->vk, result);
@@ -6067,10 +6070,18 @@ tu_CmdDraw(VkCommandBuffer commandBuffer,
 
    tu6_draw_common<CHIP>(cmd, cs, false, vertexCount);
 
-   tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 3);
-   tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_AUTO_INDEX));
-   tu_cs_emit(cs, instanceCount);
-   tu_cs_emit(cs, vertexCount);
+   /* Adreno 5xx draws the views of multiview one after the other */
+   const bool a5xx = tu_is_a5xx(cmd->device);
+
+   u_foreach_bit (view, a5xx ? tu5_views(cmd) : 1) {
+      if (a5xx)
+         tu5_bind_view(cmd, cs, view);
+
+      tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 3);
+      tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_AUTO_INDEX));
+      tu_cs_emit(cs, instanceCount);
+      tu_cs_emit(cs, vertexCount);
+   }
 }
 TU_GENX(tu_CmdDraw);
 
@@ -6136,13 +6147,20 @@ tu_CmdDrawIndexed(VkCommandBuffer commandBuffer,
 
    tu6_draw_common<CHIP>(cmd, cs, true, indexCount);
 
-   tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 7);
-   tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_DMA));
-   tu_cs_emit(cs, instanceCount);
-   tu_cs_emit(cs, indexCount);
-   tu_cs_emit(cs, firstIndex);
-   tu_cs_emit_qw(cs, cmd->state.index_va);
-   tu_cs_emit(cs, cmd->state.max_index_count);
+   const bool a5xx = tu_is_a5xx(cmd->device);
+
+   u_foreach_bit (view, a5xx ? tu5_views(cmd) : 1) {
+      if (a5xx)
+         tu5_bind_view(cmd, cs, view);
+
+      tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 7);
+      tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_DMA));
+      tu_cs_emit(cs, instanceCount);
+      tu_cs_emit(cs, indexCount);
+      tu_cs_emit(cs, firstIndex);
+      tu_cs_emit_qw(cs, cmd->state.index_va);
+      tu_cs_emit(cs, cmd->state.max_index_count);
+   }
 }
 TU_GENX(tu_CmdDrawIndexed);
 
@@ -6231,8 +6249,12 @@ tu_CmdDrawIndirect(VkCommandBuffer commandBuffer,
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
 
    if (tu_is_a5xx(cmd->device)) {
-      tu5_draw_indirect(cmd, cs, tu_draw_initiator(cmd, DI_SRC_SEL_AUTO_INDEX),
-                        false, buf->iova + offset, drawCount, stride);
+      u_foreach_bit (view, tu5_views(cmd)) {
+         tu5_bind_view(cmd, cs, view);
+         tu5_draw_indirect(cmd, cs,
+                           tu_draw_initiator(cmd, DI_SRC_SEL_AUTO_INDEX), false,
+                           buf->iova + offset, drawCount, stride);
+      }
       return;
    }
 
@@ -6266,8 +6288,11 @@ tu_CmdDrawIndexedIndirect(VkCommandBuffer commandBuffer,
    tu6_draw_common<CHIP>(cmd, cs, true, 0);
 
    if (tu_is_a5xx(cmd->device)) {
-      tu5_draw_indirect(cmd, cs, tu_draw_initiator(cmd, DI_SRC_SEL_DMA), true,
-                        buf->iova + offset, drawCount, stride);
+      u_foreach_bit (view, tu5_views(cmd)) {
+         tu5_bind_view(cmd, cs, view);
+         tu5_draw_indirect(cmd, cs, tu_draw_initiator(cmd, DI_SRC_SEL_DMA),
+                           true, buf->iova + offset, drawCount, stride);
+      }
       return;
    }
 

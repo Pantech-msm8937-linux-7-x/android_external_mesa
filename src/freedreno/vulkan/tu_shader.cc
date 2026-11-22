@@ -48,7 +48,9 @@ tu_spirv_to_nir(struct tu_device *dev,
       /* ViewID is a sysval in geometry stages and an input in the FS */
       .view_index_is_input =
          stage == MESA_SHADER_FRAGMENT &&
-         !key->lower_view_index_to_device_index,
+         !key->lower_view_index_to_device_index &&
+         /* a constant of each draw there, see tu5_lower_view_index() */
+         !tu_is_a5xx(dev),
 
       /* Use 16-bit math for RelaxedPrecision ALU ops */
       .mediump_16bit_alu = true,
@@ -1008,6 +1010,40 @@ shader_uses_push_consts(nir_shader *shader)
    return false;
 }
 
+/* Adreno 5xx draws the views one after the other, the index of the view
+ * being a constant of the shaders for each.
+ */
+static bool
+tu5_lower_view_index(nir_builder *b, nir_intrinsic_instr *intrin, void *data)
+{
+   const uint32_t *loc = (const uint32_t *)data;
+
+   if (intrin->intrinsic != nir_intrinsic_load_view_index)
+      return false;
+
+   b->cursor = nir_before_instr(&intrin->instr);
+   nir_def_replace(&intrin->def,
+                   nir_load_const_ir3(b, 1, 32, nir_imm_int(b, 0),
+                                      .base = *loc));
+   return true;
+}
+
+static bool
+tu5_uses_view_index(nir_shader *shader)
+{
+   nir_foreach_function_impl (impl, shader) {
+      nir_foreach_block (block, impl) {
+         nir_foreach_instr (instr, block) {
+            if (instr->type == nir_instr_type_intrinsic &&
+                nir_instr_as_intrinsic(instr)->intrinsic ==
+                   nir_intrinsic_load_view_index)
+               return true;
+         }
+      }
+   }
+   return false;
+}
+
 static bool
 tu_lower_io(nir_shader *shader, struct tu_device *dev,
             struct tu_shader *tu_shader,
@@ -1039,6 +1075,15 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
    unsigned reserved_consts_vec4 =
       align(DIV_ROUND_UP(const_state->push_consts.dwords, 4),
             dev->compiler->const_upload_unit);
+
+   const_state->a5xx.view_loc = ~0u;
+   if (tu_is_a5xx(dev) && tu5_uses_view_index(shader)) {
+      const_state->a5xx.view_loc = reserved_consts_vec4 * 4;
+      reserved_consts_vec4 += dev->compiler->const_upload_unit;
+      nir_shader_intrinsics_pass(shader, tu5_lower_view_index,
+                                 nir_metadata_control_flow,
+                                 &const_state->a5xx.view_loc);
+   }
 
    bool unknown_dynamic_size = false;
    bool unknown_dynamic_offset = false;
@@ -2616,7 +2661,10 @@ tu_shader_create(struct tu_device *dev,
    if (nir->info.stage == MESA_SHADER_FRAGMENT) {
       const nir_input_attachment_options att_options = {
          .use_fragcoord_sysval = true,
-         .use_layer_id_sysval = false,
+         /* Adreno 5xx: the index of the view is a constant, see
+          * tu5_lower_view_index()
+          */
+         .use_layer_id_sysval = tu_is_a5xx(dev) && key->multiview_mask != 0,
          /* When using multiview rendering, we must use
           * gl_ViewIndex as the layer id to pass to the texture
           * sampling function. gl_Layer doesn't work when
@@ -2650,7 +2698,8 @@ tu_shader_create(struct tu_device *dev,
     */
    ir3_nir_lower_io_to_temporaries(nir);
 
-   if (nir->info.stage == MESA_SHADER_VERTEX && key->multiview_mask) {
+   if (nir->info.stage == MESA_SHADER_VERTEX && key->multiview_mask &&
+       !tu_is_a5xx(dev)) {
       tu_nir_lower_multiview(nir, key->multiview_mask, dev);
    }
 
