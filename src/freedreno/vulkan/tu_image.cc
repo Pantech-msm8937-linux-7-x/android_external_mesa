@@ -1023,6 +1023,22 @@ tu_BindImageMemory2(VkDevice _device,
                return result;
             }
          }
+         /* a plane of a disjoint image, in memory of its own */
+         const VkBindImagePlaneMemoryInfo *plane_info =
+            vk_find_struct_const(pBindInfos[i].pNext,
+                                 BIND_IMAGE_PLANE_MEMORY_INFO);
+         if (plane_info &&
+             (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)) {
+            unsigned plane =
+               tu6_plane_index(image->vk.format, plane_info->planeAspect);
+
+            image->plane_base[plane] = mem->bo->iova +
+                                       pBindInfos[i].memoryOffset -
+                                       tu_image_plane_start(image, plane);
+            if (plane)
+               continue;
+         }
+
          image->bo = mem->bo;
          image->bo_offset = pBindInfos[i].memoryOffset;
          image->iova = mem->bo->iova + pBindInfos[i].memoryOffset;
@@ -1063,10 +1079,19 @@ tu_BindImageMemory2(VkDevice _device,
 
 static void
 tu_get_image_memory_requirements(struct tu_device *dev, struct tu_image *image,
-                                 VkMemoryRequirements2 *pMemoryRequirements)
+                                 VkMemoryRequirements2 *pMemoryRequirements,
+                                 VkImageAspectFlags plane_aspect = 0)
 {
+   uint64_t size = image->total_size;
+
+   /* one plane of a disjoint image */
+   if (plane_aspect && (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)) {
+      unsigned plane = tu6_plane_index(image->vk.format, plane_aspect);
+      size = image->layout[plane].size - tu_image_plane_start(image, plane);
+   }
+
    pMemoryRequirements->memoryRequirements = (VkMemoryRequirements) {
-      .size = image->total_size,
+      .size = size,
       .alignment = image->layout[0].base_align,
       .memoryTypeBits = (1 << dev->physical_device->memory.type_count) - 1,
    };
@@ -1094,8 +1119,11 @@ tu_GetImageMemoryRequirements2(VkDevice _device,
 {
    VK_FROM_HANDLE(tu_device, device, _device);
    VK_FROM_HANDLE(tu_image, image, pInfo->image);
+   const VkImagePlaneMemoryRequirementsInfo *plane_info =
+      vk_find_struct_const(pInfo->pNext, IMAGE_PLANE_MEMORY_REQUIREMENTS_INFO);
 
-   tu_get_image_memory_requirements(device, image, pMemoryRequirements);
+   tu_get_image_memory_requirements(device, image, pMemoryRequirements,
+                                    plane_info ? plane_info->planeAspect : 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -1122,7 +1150,8 @@ tu_GetDeviceImageMemoryRequirements(
    tu_image_init(device, &image, pInfo->pCreateInfo);
    TU_CALLX(device, tu_image_update_layout)(device, &image, DRM_FORMAT_MOD_INVALID, NULL);
 
-   tu_get_image_memory_requirements(device, &image, pMemoryRequirements);
+   tu_get_image_memory_requirements(device, &image, pMemoryRequirements,
+                                    pInfo->planeAspect);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -1140,15 +1169,19 @@ tu_get_image_subresource_layout(struct tu_image *image,
                                 const VkImageSubresource2KHR *pSubresource,
                                 VkSubresourceLayout2KHR *pLayout)
 {
-   struct fdl_layout *layout =
-      &image->layout[tu6_plane_index(image->vk.format,
-                                     pSubresource->imageSubresource.aspectMask)];
+   const unsigned plane =
+      tu6_plane_index(image->vk.format,
+                      pSubresource->imageSubresource.aspectMask);
+   struct fdl_layout *layout = &image->layout[plane];
    const struct fdl_slice *slice = layout->slices +
       pSubresource->imageSubresource.mipLevel;
 
    pLayout->subresourceLayout.offset =
       fdl_surface_offset(layout, pSubresource->imageSubresource.mipLevel,
                          pSubresource->imageSubresource.arrayLayer);
+   /* in the memory of the plane, for a disjoint image */
+   if (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)
+      pLayout->subresourceLayout.offset -= tu_image_plane_start(image, plane);
    pLayout->subresourceLayout.rowPitch =
       fdl_pitch(layout, pSubresource->imageSubresource.mipLevel);
    pLayout->subresourceLayout.arrayPitch =

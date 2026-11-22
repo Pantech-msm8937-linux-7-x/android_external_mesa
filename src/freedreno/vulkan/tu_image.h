@@ -38,6 +38,12 @@ struct tu_image
    uint64_t bo_offset;
    uint64_t iova;
 
+   /* Adreno 5xx, the planes of a disjoint image being bound one by one:
+    * where the offsets of the layout of each are from, see
+    * tu_image_plane_iova()
+    */
+   uint64_t plane_base[3];
+
    /* For fragment density map */
    void *map;
 
@@ -82,6 +88,21 @@ struct tu_image_view
 };
 VK_DEFINE_NONDISP_HANDLE_CASTS(tu_image_view, vk.base, VkImageView,
                                VK_OBJECT_TYPE_IMAGE_VIEW);
+
+/* The address the offsets of the layout of a plane are from */
+static inline uint64_t
+tu_image_plane_iova(const struct tu_image *image, unsigned plane)
+{
+   return (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)
+             ? image->plane_base[plane] : image->iova;
+}
+
+/* Where a plane of an image begins in it, and its size */
+static inline uint64_t
+tu_image_plane_start(const struct tu_image *image, unsigned plane)
+{
+   return plane ? image->layout[plane].slices[0].offset : 0;
+}
 
 uint32_t tu6_plane_count(VkFormat format);
 
