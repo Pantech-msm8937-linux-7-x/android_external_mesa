@@ -33,6 +33,8 @@
 #include "tu_image.h"
 #include "tu_formats.h"
 #include "tu_rmv.h"
+#include "tu_sampler.h"
+#include "tu5.h"
 
 static inline uint8_t *
 pool_base(struct tu_descriptor_pool *pool)
@@ -47,6 +49,19 @@ descriptor_size(struct tu_device *dev,
 {
    switch (type) {
    case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+      /* Adreno 5xx: the other planes of the multi-planar images, after the
+       * sampler, see TU5_YCBCR_PLANE_SLOT
+       */
+      if (dev->physical_device->info->chip == 5 && binding &&
+          binding->pImmutableSamplers) {
+         for (unsigned i = 0; i < binding->descriptorCount; i++) {
+            VK_FROM_HANDLE(tu_sampler, sampler,
+                           binding->pImmutableSamplers[i]);
+            if (sampler->vk.ycbcr_conversion)
+               return A6XX_TEX_CONST_DWORDS * 4 * TU5_YCBCR_SLOTS;
+         }
+      }
+
       /* We make offsets and sizes all 16 dwords, to match how the hardware
        * interprets indices passed to sample/load/store instructions in
        * multiples of 16 dwords.  This means that "normal" descriptors are all
@@ -445,6 +460,13 @@ sha1_update_ycbcr_sampler(struct mesa_sha1 *ctx,
    SHA1_UPDATE_VALUE(ctx, sampler->ycbcr_model);
    SHA1_UPDATE_VALUE(ctx, sampler->ycbcr_range);
    SHA1_UPDATE_VALUE(ctx, sampler->format);
+   /* Adreno 5xx puts the planes together in the shader, the swizzles and
+    * the chroma reconstruction of the conversion included
+    */
+   SHA1_UPDATE_VALUE(ctx, sampler->mapping);
+   SHA1_UPDATE_VALUE(ctx, sampler->chroma_offsets);
+   SHA1_UPDATE_VALUE(ctx, sampler->chroma_filter);
+   SHA1_UPDATE_VALUE(ctx, sampler->chroma_reconstruction);
 }
 
 static void
@@ -1134,6 +1156,20 @@ write_combined_image_sampler_descriptor(uint32_t *dst,
       VK_FROM_HANDLE(tu_sampler, sampler, image_info->sampler);
 
       memcpy(dst + A6XX_TEX_CONST_DWORDS, sampler->descriptor, sizeof(sampler->descriptor));
+   }
+
+   /* Adreno 5xx: the other planes, which a view of a multi-planar format
+    * may only be used with an immutable sampler with a conversion for: the
+    * binding has room for them, see descriptor_size().
+    */
+   if (image_info && image_info->imageView != VK_NULL_HANDLE) {
+      VK_FROM_HANDLE(tu_image_view, iview, image_info->imageView);
+
+      for (unsigned p = 1; p < iview->a5xx_planes; p++) {
+         memcpy(dst + TU5_YCBCR_PLANE_SLOT(p) * A6XX_TEX_CONST_DWORDS,
+                iview->a5xx_plane_descriptor[p - 1],
+                sizeof(iview->a5xx_plane_descriptor[p - 1]));
+      }
    }
 }
 
