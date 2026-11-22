@@ -784,6 +784,7 @@ tu_get_features(struct tu_physical_device *pdevice,
       features->inheritedQueries = true;
       features->pipelineCreationCacheControl = true;
       features->indexTypeUint8 = true;
+      features->depthClamp = true;
    }
 }
 
