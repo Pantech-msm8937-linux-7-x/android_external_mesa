@@ -96,7 +96,8 @@ static struct disk_cache *
 disk_cache_type_create(const char *gpu_name,
                        const char *driver_id,
                        uint64_t driver_flags,
-                       enum disk_cache_type cache_type)
+                       enum disk_cache_type cache_type,
+                       const char *dir)
 {
    void *local;
    struct disk_cache *cache = NULL;
@@ -119,11 +120,15 @@ disk_cache_type_create(const char *gpu_name,
    cache->path_init_failed = true;
    cache->type = DISK_CACHE_NONE;
 
-   if (!disk_cache_enabled())
+   /* A directory given is a cache asked for also where there is none by
+    * default (Android), but not against MESA_SHADER_CACHE_DISABLE.
+    */
+   if (dir ? debug_get_bool_option("MESA_SHADER_CACHE_DISABLE", false)
+           : !disk_cache_enabled())
       goto path_fail;
 
    char *path = disk_cache_generate_cache_dir(local, gpu_name, driver_id,
-                                              cache_type);
+                                              cache_type, dir);
    if (!path)
       goto path_fail;
 
@@ -142,11 +147,17 @@ disk_cache_type_create(const char *gpu_name,
       if (!disk_cache_load_cache_index_foz(local, cache))
          goto path_fail;
    } else if (cache_type == DISK_CACHE_DATABASE) {
+      /* A few parts in the directory of an app: an empty part takes some
+       * room already.
+       */
+      if (dir)
+         cache->cache_db.num_parts = 4;
       if (!disk_cache_db_load_cache_index(local, cache))
          goto path_fail;
    }
 
-   if (!getenv("MESA_SHADER_CACHE_DIR") && !getenv("MESA_GLSL_CACHE_DIR"))
+   if (!dir && !getenv("MESA_SHADER_CACHE_DIR") &&
+       !getenv("MESA_GLSL_CACHE_DIR"))
       disk_cache_touch_cache_user_marker(cache->path);
 
    cache->type = cache_type;
@@ -200,9 +211,11 @@ disk_cache_type_create(const char *gpu_name,
       }
    }
 
-   /* Default to 1GB for maximum cache size. */
+   /* Default to 1GB for maximum cache size, 32 MB in a directory given (that
+    * of an app).
+    */
    if (max_size == 0) {
-      max_size = 1024*1024*1024;
+      max_size = dir ? 32*1024*1024 : 1024*1024*1024;
    }
 
    cache->max_size = max_size;
@@ -284,7 +297,7 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
 
    /* Create main writable cache. */
    cache = disk_cache_type_create(gpu_name, driver_id, driver_flags,
-                                  cache_type);
+                                  cache_type, NULL);
    if (!cache)
       return NULL;
 
@@ -302,10 +315,19 @@ disk_cache_create(const char *gpu_name, const char *driver_id,
        */
       cache->foz_ro_cache = disk_cache_type_create(gpu_name, driver_id,
                                                    driver_flags,
-                                                   DISK_CACHE_SINGLE_FILE);
+                                                   DISK_CACHE_SINGLE_FILE,
+                                                   NULL);
    }
 
    return cache;
+}
+
+struct disk_cache *
+disk_cache_create_in_dir(const char *gpu_name, const char *driver_id,
+                         uint64_t driver_flags, const char *dir)
+{
+   return disk_cache_type_create(gpu_name, driver_id, driver_flags,
+                                 DISK_CACHE_DATABASE, dir);
 }
 
 void
