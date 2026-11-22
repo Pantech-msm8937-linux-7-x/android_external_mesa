@@ -4311,8 +4311,11 @@ tu_CmdExecuteCommands(VkCommandBuffer commandBuffer,
           VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
          assert(tu_cs_is_empty(&secondary->cs));
 
-         if (tu_is_a5xx(cmd->device))
+         if (tu_is_a5xx(cmd->device)) {
             tu5_write_view_bases(cmd, &cmd->draw_cs);
+            /* what the secondary command buffer leaves is not known */
+            cmd->state.a5xx_vs = cmd->state.a5xx_fs = NULL;
+         }
 
          result = tu_cs_add_entries(&cmd->draw_cs, &secondary->draw_cs);
          if (result != VK_SUCCESS) {
