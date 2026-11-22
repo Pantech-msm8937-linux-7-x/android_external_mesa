@@ -785,6 +785,8 @@ tu_get_features(struct tu_physical_device *pdevice,
       features->pipelineCreationCacheControl = true;
       features->indexTypeUint8 = true;
       features->depthClamp = true;
+      features->shaderClipDistance = true;
+      features->shaderCullDistance = true;
    }
 }
 
@@ -1163,9 +1165,6 @@ tu_get_properties(struct tu_physical_device *pdevice,
       props->maxVertexInputBindings = 16;
       props->maxViewports = 1;
       props->maxFragmentDualSrcAttachments = 0;
-      props->maxClipDistances = 0;
-      props->maxCullDistances = 0;
-      props->maxCombinedClipAndCullDistances = 0;
       props->lineWidthRange[0] = props->lineWidthRange[1] = 1.0;
       props->lineWidthGranularity = 0.0;
    }
