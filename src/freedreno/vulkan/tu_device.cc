@@ -9,6 +9,8 @@
 
 #include "tu_device.h"
 
+#include "tu5.h"
+
 #include "drm-uapi/drm_fourcc.h"
 #include "fdl/freedreno_layout.h"
 #include <fcntl.h>
@@ -2638,6 +2640,10 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       VkClearColorValue border_color = vk_border_color_value((VkBorderColor) i);
       tu6_pack_border_color(&global->bcolor_builtin[i], &border_color,
                             vk_border_color_is_int((VkBorderColor) i));
+      if (tu_is_a5xx(device)) {
+         tu5_pack_border_color(&global->bcolor_builtin[i], &border_color,
+                               vk_border_color_is_int((VkBorderColor) i));
+      }
    }
 
    /* initialize to ones so ffs can be used to find unused slots */
