@@ -8,6 +8,8 @@
 
 #include "tu_clear_blit.h"
 
+#include "tu5.h"
+
 #include "ir3/ir3_nir.h"
 
 #include "util/format_r11g11b10f.h"
@@ -661,6 +663,59 @@ build_clear_vs_shader(void)
    return b->shader;
 }
 
+/* The vertex shader of the rectangles a5xx draws to clear and to blit: four
+ * vertices of a triangle strip, between two corners given in clip space, with
+ * the texture coordinates of each. a5xx is not known to have a way to turn the
+ * viewport transform off as the RECTLIST draws of a6xx do.
+ *
+ *   c0: x0, y0, x1, y1 of the positions
+ *   c1: s0, t0, s1, t1 of the texture coordinates
+ *   c2: z of the position, third texture coordinate
+ */
+static nir_shader *
+build_rect5_vs_shader(void)
+{
+   nir_builder _b =
+      nir_builder_init_simple_shader(MESA_SHADER_VERTEX, NULL, "rect vs");
+   nir_builder *b = &_b;
+   b->shader->info.internal = true;
+
+   nir_variable *out_pos =
+      nir_variable_create(b->shader, nir_var_shader_out, glsl_vec4_type(),
+                          "gl_Position");
+   out_pos->data.location = VARYING_SLOT_POS;
+
+   nir_def *pos0 = load_const(b, 0, 2);
+   nir_def *pos1 = load_const(b, 2, 2);
+   nir_def *tex0 = load_const(b, 4, 2);
+   nir_def *tex1 = load_const(b, 6, 2);
+   nir_def *z = load_const(b, 8, 1);
+   nir_def *tex_z = load_const(b, 9, 1);
+
+   nir_def *vertex = nir_load_vertex_id(b);
+   nir_def *right = nir_i2b(b, nir_iand_imm(b, vertex, 1));
+   nir_def *bottom = nir_i2b(b, nir_iand_imm(b, vertex, 2));
+
+   nir_def *pos = nir_vec4(b,
+      nir_bcsel(b, right, nir_channel(b, pos1, 0), nir_channel(b, pos0, 0)),
+      nir_bcsel(b, bottom, nir_channel(b, pos1, 1), nir_channel(b, pos0, 1)),
+      z, nir_imm_float(b, 1.0));
+   nir_store_var(b, out_pos, pos, 0xf);
+
+   nir_variable *out_coords =
+      nir_variable_create(b->shader, nir_var_shader_out, glsl_vec_type(3),
+                          "coords");
+   out_coords->data.location = VARYING_SLOT_VAR0;
+
+   nir_def *coords = nir_vec3(b,
+      nir_bcsel(b, right, nir_channel(b, tex1, 0), nir_channel(b, tex0, 0)),
+      nir_bcsel(b, bottom, nir_channel(b, tex1, 1), nir_channel(b, tex0, 1)),
+      tex_z);
+   nir_store_var(b, out_coords, coords, 0x7);
+
+   return b->shader;
+}
+
 static nir_shader *
 build_blit_fs_shader(bool zscale)
 {
@@ -837,6 +892,8 @@ tu_init_clear_blit_shaders(struct tu_device *dev)
    compile_shader(dev, build_blit_fs_shader(true), 0, &offset, GLOBAL_SH_FS_BLIT_ZSCALE);
    compile_shader(dev, build_ms_copy_fs_shader(false), 0, &offset, GLOBAL_SH_FS_COPY_MS);
    compile_shader(dev, build_ms_copy_fs_shader(true), 0, &offset, GLOBAL_SH_FS_COPY_MS_HALF);
+   if (tu_is_a5xx(dev))
+      compile_shader(dev, build_rect5_vs_shader(), 3, &offset, GLOBAL_SH_VS_RECT5);
 
    for (uint32_t num_rts = 0; num_rts <= MAX_RTS; num_rts++) {
       compile_shader(dev, build_clear_fs_shader(num_rts), num_rts, &offset,
@@ -3679,6 +3736,12 @@ tu_CmdClearColorImage(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_image, image, image_h);
 
+   if (tu_is_a5xx(cmd->device)) {
+      tu5_clear_image(cmd, image, (const VkClearValue *)pColor, rangeCount,
+                      pRanges);
+      return;
+   }
+
    if (use_generic_clear_for_image_clear(cmd, image)) {
       /* Generic clear doesn't go through CCU (or other caches). */
       cmd->state.cache.flush_bits |=
@@ -3703,6 +3766,13 @@ tu_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer,
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_image, image, image_h);
+
+   if (tu_is_a5xx(cmd->device)) {
+      VkClearValue value = {};
+      value.depthStencil = *pDepthStencil;
+      tu5_clear_image(cmd, image, &value, rangeCount, pRanges);
+      return;
+   }
 
    if (use_generic_clear_for_image_clear(cmd, image)) {
       /* Generic clear doesn't go through CCU (or other caches). */
@@ -4210,6 +4280,12 @@ tu_CmdClearAttachments(VkCommandBuffer commandBuffer,
                        const VkClearRect *pRects)
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+
+   if (tu_is_a5xx(cmd->device)) {
+      tu5_clear_attachments(cmd, attachmentCount, pAttachments, rectCount,
+                            pRects);
+      return;
+   }
 
    for (uint32_t j = 0; j < attachmentCount; j++) {
       if ((pAttachments[j].aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) == 0)
