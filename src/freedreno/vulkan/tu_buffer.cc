@@ -118,6 +118,17 @@ tu_GetPhysicalDeviceExternalBufferProperties(
       flags = VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
       compat_flags = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
       break;
+#if DETECT_OS_ANDROID
+   case VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID:
+      /* BLOB buffers, which the runtime allocates (vk_alloc_ahardware_buffer())
+       * and tu_AllocateMemory() imports
+       */
+      flags = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT |
+              VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+      compat_flags = export_flags =
+         VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
+      break;
+#endif
    default:
       break;
    }

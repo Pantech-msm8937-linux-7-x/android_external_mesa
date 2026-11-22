@@ -336,6 +336,13 @@ struct tu_device
 
    uint32_t implicit_sync_bo_count;
 
+   /* VK_EXT_device_memory_report: the callbacks of the device */
+   struct {
+      PFN_vkDeviceMemoryReportCallbackEXT callback;
+      void *data;
+   } memory_reports[4];
+   uint32_t memory_report_count;
+
    /* Device-global BO suballocator for reducing BO management overhead for
     * (read-only) pipeline state.  Synchronized by pipeline_mutex.
     */
@@ -465,6 +472,9 @@ struct tu_device_memory
 
    /* for dedicated allocations */
    struct tu_image *image;
+
+   /* imported rather than allocated, for VK_EXT_device_memory_report */
+   bool imported;
 };
 VK_DEFINE_NONDISP_HANDLE_CASTS(tu_device_memory, vk.base, VkDeviceMemory,
                                VK_OBJECT_TYPE_DEVICE_MEMORY)

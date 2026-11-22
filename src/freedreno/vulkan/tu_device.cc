@@ -346,6 +346,7 @@ get_device_extensions(const struct tu_physical_device *device,
          .KHR_relaxed_block_layout = true,
          .KHR_sampler_mirror_clamp_to_edge = true,
          .KHR_sampler_ycbcr_conversion = true,
+         .EXT_device_memory_report = true,
          .KHR_separate_depth_stencil_layouts = true,
          .KHR_shader_draw_parameters = true,
          .KHR_shader_float_controls = true,
@@ -810,6 +811,7 @@ tu_get_features(struct tu_physical_device *pdevice,
       features->samplerFilterMinmax = true;
       features->vertexPipelineStoresAndAtomics = true;
       features->samplerYcbcrConversion = true;
+      features->deviceMemoryReport = true;
    }
 }
 
@@ -2587,6 +2589,24 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    device->physical_device = physical_device;
    device->device_idx = device->physical_device->device_count++;
 
+   vk_foreach_struct_const (ext, pCreateInfo->pNext) {
+      if (ext->sType !=
+          VK_STRUCTURE_TYPE_DEVICE_DEVICE_MEMORY_REPORT_CREATE_INFO_EXT)
+         continue;
+
+      const VkDeviceDeviceMemoryReportCreateInfoEXT *report =
+         (const VkDeviceDeviceMemoryReportCreateInfoEXT *) ext;
+      if (device->memory_report_count == ARRAY_SIZE(device->memory_reports)) {
+         mesa_loge("too many device memory report callbacks");
+         break;
+      }
+      device->memory_reports[device->memory_report_count].callback =
+         report->pfnUserCallback;
+      device->memory_reports[device->memory_report_count].data =
+         report->pUserData;
+      device->memory_report_count++;
+   }
+
    result = tu_drm_device_init(device);
    if (result != VK_SUCCESS) {
       vk_free(&device->vk.alloc, device);
@@ -3121,6 +3141,33 @@ vk_icdGetInstanceProcAddr(VkInstance instance, const char *pName)
    return tu_GetInstanceProcAddr(instance, pName);
 }
 
+/* VK_EXT_device_memory_report: an event of a memory object, which the BO
+ * names (the same one when imported from this device)
+ */
+static void
+tu_report_device_memory(struct tu_device *device,
+                        VkDeviceMemoryReportEventTypeEXT type,
+                        const struct tu_bo *bo, uint64_t size,
+                        uint64_t handle, VkObjectType object_type)
+{
+   if (!device->memory_report_count)
+      return;
+
+   const VkDeviceMemoryReportCallbackDataEXT report = {
+      .sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_REPORT_CALLBACK_DATA_EXT,
+      .type = type,
+      .memoryObjectId = bo ? bo->gem_handle : 0,
+      .size = size,
+      .objectType = object_type,
+      .objectHandle = handle,
+      .heapIndex = 0,
+   };
+
+   for (uint32_t i = 0; i < device->memory_report_count; i++)
+      device->memory_reports[i].callback(&report,
+                                         device->memory_reports[i].data);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_AllocateMemory(VkDevice _device,
                   const VkMemoryAllocateInfo *pAllocateInfo,
@@ -3135,8 +3182,13 @@ tu_AllocateMemory(VkDevice _device,
 
    struct tu_memory_heap *mem_heap = &device->physical_device->heap;
    uint64_t mem_heap_used = p_atomic_read(&mem_heap->used);
-   if (mem_heap_used > mem_heap->size)
+   if (mem_heap_used > mem_heap->size) {
+      tu_report_device_memory(device,
+                              VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_ALLOCATION_FAILED_EXT,
+                              NULL, pAllocateInfo->allocationSize, 0,
+                              VK_OBJECT_TYPE_DEVICE_MEMORY);
       return vk_error(device, VK_ERROR_OUT_OF_DEVICE_MEMORY);
+   }
 
    mem = (struct tu_device_memory *) vk_device_memory_create(
       &device->vk, pAllocateInfo, pAllocator, sizeof(*mem));
@@ -3152,6 +3204,11 @@ tu_AllocateMemory(VkDevice _device,
 
    const VkImportMemoryFdInfoKHR *fd_info =
       vk_find_struct_const(pAllocateInfo->pNext, IMPORT_MEMORY_FD_INFO_KHR);
+
+   /* not the AHB the runtime allocated to export the memory as */
+   mem->imported = (fd_info && fd_info->handleType) ||
+                   vk_find_struct_const(pAllocateInfo->pNext,
+                                        IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID);
 
    if (fd_info && fd_info->handleType) {
       assert(fd_info->handleType ==
@@ -3230,6 +3287,10 @@ tu_AllocateMemory(VkDevice _device,
 
    if (result != VK_SUCCESS) {
       vk_device_memory_destroy(&device->vk, pAllocator, &mem->vk);
+      tu_report_device_memory(device,
+                              VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_ALLOCATION_FAILED_EXT,
+                              NULL, pAllocateInfo->allocationSize, 0,
+                              VK_OBJECT_TYPE_DEVICE_MEMORY);
       return result;
    }
 
@@ -3259,6 +3320,13 @@ tu_AllocateMemory(VkDevice _device,
 
    *pMem = tu_device_memory_to_handle(mem);
 
+   tu_report_device_memory(device,
+                           mem->imported
+                              ? VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_IMPORT_EXT
+                              : VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_ALLOCATE_EXT,
+                           mem->bo, mem->bo->size, (uint64_t) *pMem,
+                           VK_OBJECT_TYPE_DEVICE_MEMORY);
+
    return VK_SUCCESS;
 }
 
@@ -3274,6 +3342,13 @@ tu_FreeMemory(VkDevice _device,
       return;
 
    TU_RMV(resource_destroy, device, mem);
+
+   tu_report_device_memory(device,
+                           mem->imported
+                              ? VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_UNIMPORT_EXT
+                              : VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_FREE_EXT,
+                           mem->bo, mem->bo->size, (uint64_t) _mem,
+                           VK_OBJECT_TYPE_DEVICE_MEMORY);
 
    p_atomic_add(&device->physical_device->heap.used, -mem->bo->size);
    tu_bo_finish(device, mem->bo);
