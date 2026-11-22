@@ -30,6 +30,20 @@
 
 /* ir3_reg_ctx implementation. */
 
+/* On Adreno 505, a shader that uses its 48 full registers and more than 32
+ * half registers hangs the GPU: with the half registers taking half the room
+ * of the full ones, these are 64 registers in all. Keep the half registers
+ * within that for all that the full ones may take.
+ */
+static unsigned
+ra_half_size(const struct ir3_shader_variant *v)
+{
+   if (v->compiler->gen == 5)
+      return 4 * 32;
+
+   return RA_HALF_SIZE;
+}
+
 static int
 ir3_reg_interval_cmp(const struct rb_node *node, const void *data)
 {
@@ -2626,7 +2640,7 @@ ir3_ra(struct ir3_shader_variant *v)
 
    struct ir3_pressure limit_pressure;
    limit_pressure.full = RA_FULL_SIZE;
-   limit_pressure.half = RA_HALF_SIZE;
+   limit_pressure.half = ra_half_size(v);
    limit_pressure.shared = RA_SHARED_SIZE;
    limit_pressure.shared_half = RA_SHARED_HALF_SIZE;
 
@@ -2697,7 +2711,7 @@ ir3_ra(struct ir3_shader_variant *v)
    d("full size: %u", ctx->full.size);
 
    if (!v->mergedregs)
-      ctx->half.size = RA_HALF_SIZE;
+      ctx->half.size = ra_half_size(v);
 
    ctx->shared.size = RA_SHARED_SIZE;
 
