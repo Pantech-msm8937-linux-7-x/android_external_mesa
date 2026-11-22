@@ -855,6 +855,13 @@ tu5_draw_indirect(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    }
 }
 
+void
+tu5_emit_restart_index(struct tu_cs *cs, uint32_t restart_index)
+{
+   OUT_PKT4(cs, REG_A5XX_PC_RESTART_INDEX, 1);
+   OUT_RING(cs, restart_index);
+}
+
 /* vkCmdDispatch(): the compute shader and all its state, then the grid */
 void
 tu5_dispatch(struct tu_cmd_buffer *cmd, const uint32_t *blocks,

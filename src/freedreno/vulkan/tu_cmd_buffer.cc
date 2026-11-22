@@ -2827,8 +2827,12 @@ tu_CmdBindIndexBuffer2KHR(VkCommandBuffer commandBuffer,
 
    if (buf) {
       /* initialize/update the restart index */
-      if (cmd->state.index_size != index_size)
-         tu_cs_emit_regs(&cmd->draw_cs, A6XX_PC_RESTART_INDEX(restart_index));
+      if (cmd->state.index_size != index_size) {
+         if (tu_is_a5xx(cmd->device))
+            tu5_emit_restart_index(&cmd->draw_cs, restart_index);
+         else
+            tu_cs_emit_regs(&cmd->draw_cs, A6XX_PC_RESTART_INDEX(restart_index));
+      }
 
       cmd->state.index_va = buf->iova + offset;
       cmd->state.max_index_count = size >> index_shift;
