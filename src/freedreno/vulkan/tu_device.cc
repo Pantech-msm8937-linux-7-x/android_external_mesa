@@ -1336,6 +1336,16 @@ tu_physical_device_init(struct tu_physical_device *device,
       }
       break;
    }
+   case 5:
+      /* No bindless descriptors, no CCUs, no LRZ, no UBWC, and geometry and
+       * tessellation shaders are left out.
+       */
+      device->dev_info = info;
+      device->info = &device->dev_info;
+      device->usable_gmem_size_gmem = device->gmem_size;
+      device->usable_sets = 4;
+      device->reserved_set_idx = -1;
+      break;
    default:
       result = vk_startup_errorf(instance, VK_ERROR_INITIALIZATION_FAILED,
                                  "device %s is unsupported", device->name);
@@ -2350,6 +2360,8 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       &dispatch_table, &tu_device_entrypoints, override_initial_entrypoints);
 
    switch (fd_dev_gen(&physical_device->dev_id)) {
+   case 5:
+      /* The a5xx paths branch off inside the A6XX variants. */
    case 6:
       vk_device_dispatch_table_from_entrypoints(
          &dispatch_table, &tu_device_entrypoints_a6xx, false);
@@ -2646,7 +2658,8 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       physical_device->info->a6xx.has_z24uint_s8uint &&
       (!border_color_without_format ||
        physical_device->instance->disable_d24s8_border_color_workaround);
-   device->use_lrz = !TU_DEBUG(NOLRZ);
+   /* TODO: LRZ on a5xx */
+   device->use_lrz = !TU_DEBUG(NOLRZ) && !tu_is_a5xx(device);
 
    tu_gpu_tracepoint_config_variable();
 

@@ -44,6 +44,8 @@ libtu_files = files(
   'tu_shader.cc',
   'tu_suballoc.cc',
   'tu_util.cc',
+  'tu5_format.c',
+  'tu5_cmd.cc',
 )
 
 libtu_includes = [

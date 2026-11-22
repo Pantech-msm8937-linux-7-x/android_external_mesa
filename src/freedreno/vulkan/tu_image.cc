@@ -492,6 +492,13 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
       image->ubwc_enabled = false;
    }
 
+   /* a5xx: the tile modes have the values of the a6xx ones, and UBWC is not
+    * supported.
+    */
+   const bool a5xx = tu_is_a5xx(device);
+   if (a5xx)
+      image->ubwc_enabled = false;
+
    /* Whether a view of the image with an R8G8 format could be made. */
    bool has_r8g8 = tu_is_r8g8(vk_format_to_pipe_format(image->vk.format));
 
@@ -540,7 +547,16 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
       layout->tile_mode = tile_mode;
       layout->ubwc = image->ubwc_enabled;
 
-      if (!fdl6_layout(layout, format,
+      if (a5xx) {
+         /* TODO: explicit layouts, for imported buffers */
+         if (plane_layouts)
+            return vk_error(device, VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT);
+
+         fdl5_layout(layout, format, image->vk.samples, width0, height0,
+                     image->vk.extent.depth, image->vk.mip_levels,
+                     image->vk.array_layers,
+                     image->vk.image_type == VK_IMAGE_TYPE_3D);
+      } else if (!fdl6_layout(layout, format,
                        image->vk.samples,
                        width0, height0,
                        image->vk.extent.depth,

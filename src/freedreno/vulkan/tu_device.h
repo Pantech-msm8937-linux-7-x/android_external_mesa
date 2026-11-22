@@ -505,6 +505,13 @@ tu_physical_device_init(struct tu_physical_device *device,
 uint64_t
 tu_device_ticks_to_ns(struct tu_device *dev, uint64_t ts);
 
+/* Adreno 5xx: see tu5.h */
+static inline bool
+tu_is_a5xx(const struct tu_device *device)
+{
+   return device->physical_device->info->chip == 5;
+}
+
 static inline struct tu_bo *
 tu_device_lookup_bo(struct tu_device *device, uint32_t handle)
 {
