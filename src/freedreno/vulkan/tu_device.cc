@@ -1814,6 +1814,12 @@ tu_GetPhysicalDeviceQueueFamilyProperties2(
    {
       p->queueFamilyProperties = tu_queue_family_properties;
 
+      /* Adreno 5xx: the UI of Android 14 asks for two queues, each being a
+       * submit queue of its own of the kernel
+       */
+      if (pdevice->info->chip == 5)
+         p->queueFamilyProperties.queueCount = 2;
+
       vk_foreach_struct(ext, p->pNext) {
          switch (ext->sType) {
          case VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES_KHR: {
