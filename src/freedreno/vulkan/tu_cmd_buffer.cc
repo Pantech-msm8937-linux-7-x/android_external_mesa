@@ -4698,6 +4698,8 @@ tu_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
          cmd->state.clear_values[i] = pRenderPassBegin->pClearValues[i];
 
    tu_choose_gmem_layout(cmd);
+   if (tu_is_a5xx(cmd->device))
+      cmd->state.a5xx_gmem = tu5_use_gmem(cmd);
 
    tu_trace_start_render_pass(cmd);
 
@@ -4816,6 +4818,8 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
       cmd->patchpoints_ctx = ralloc_context(NULL);
 
    tu_choose_gmem_layout(cmd);
+   /* Adreno 5xx: the dynamic render passes are drawn in memory */
+   cmd->state.a5xx_gmem = false;
 
    cmd->state.renderpass_cache.pending_flush_bits =
       cmd->state.cache.pending_flush_bits;
