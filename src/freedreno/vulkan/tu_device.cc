@@ -788,6 +788,8 @@ tu_get_features(struct tu_physical_device *pdevice,
       features->shaderClipDistance = true;
       features->shaderCullDistance = true;
       features->sampleRateShading = true;
+      features->dualSrcBlend = true;
+      features->alphaToOne = true;
    }
 }
 
@@ -1165,7 +1167,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
       props->maxVertexInputAttributes = 16;
       props->maxVertexInputBindings = 16;
       props->maxViewports = 1;
-      props->maxFragmentDualSrcAttachments = 0;
+      props->maxFragmentDualSrcAttachments = 1;
       props->lineWidthRange[0] = props->lineWidthRange[1] = 1.0;
       props->lineWidthGranularity = 0.0;
    }

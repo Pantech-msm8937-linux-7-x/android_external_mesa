@@ -3102,6 +3102,13 @@ tu_compile_shaders(struct tu_device *device,
 
    ir3_key.sample_shading = keys[MESA_SHADER_FRAGMENT].force_sample_interp;
 
+   /* Adreno 5xx: the sample and centroid barycentrics are the pixel ones
+    * without it (ir3 emit_intrinsic_barycentric()); they are those of the
+    * pixel center with a single sample anyway.
+    */
+   if (tu_is_a5xx(device))
+      ir3_key.msaa = true;
+
    if (nir_initial_disasm) {
       for (gl_shader_stage stage = MESA_SHADER_VERTEX;
            stage < MESA_SHADER_STAGES;
