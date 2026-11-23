@@ -2549,6 +2549,7 @@ calc_min_limit_pressure(struct ir3_shader_variant *v,
  */
 static void
 calc_limit_pressure_for_cs_with_barrier(struct ir3_shader_variant *v,
+                                        const struct ir3_pressure *max_pressure,
                                         struct ir3_pressure *limit_pressure)
 {
    const struct ir3_compiler *compiler = v->compiler;
@@ -2582,16 +2583,6 @@ calc_limit_pressure_for_cs_with_barrier(struct ir3_shader_variant *v,
    uint32_t vec4_regs_per_thread =
       compiler->reg_size_vec4 / (waves_per_wg * (double_threadsize ? 2 : 1));
 
-   /* a5xx: measured on Adreno 505 with the doubled threadsize, a workgroup
-    * with a barrier runs when its waves of 64 invocations take at most 28
-    * vec4 registers per invocation in all, it faults past that. (With the
-    * smaller threadsize, 256 invocations of 6 registers run.)
-    */
-   if (compiler->gen == 5 && double_threadsize) {
-      unsigned waves64 = DIV_ROUND_UP(threads_per_wg,
-                                      compiler->threadsize_base * 2);
-      vec4_regs_per_thread = MIN2(vec4_regs_per_thread, 28 / waves64);
-   }
    assert(vec4_regs_per_thread > 0);
 
    uint32_t half_regs_per_thread = vec4_regs_per_thread * 4 * 2;
@@ -2605,6 +2596,38 @@ calc_limit_pressure_for_cs_with_barrier(struct ir3_shader_variant *v,
           * after the first register pressure pass.
           */
       }
+   }
+
+   /* a5xx: measured on Adreno 505, a workgroup with a barrier runs when,
+    * counted in waves of 64 invocations whatever the threadsize, its waves
+    * take at most 64 half vec4 registers per invocation in all, a full one
+    * counting as two: it faults past that (8 waves of 4 full registers run,
+    * 7 of 4 full and 1 half run, 8 of them do not; 3 waves of 9 full and 2
+    * half run, of 9 and 4 do not). The full registers it needs first, what
+    * is left for the half ones.
+    */
+   if (compiler->gen == 5 && !v->mergedregs) {
+      unsigned waves64 = DIV_ROUND_UP(threads_per_wg,
+                                      compiler->threadsize_base * 2);
+      unsigned budget = 64 / MAX2(waves64, 1);
+      unsigned full_need = DIV_ROUND_UP(max_pressure->full, 2 * 4);
+      unsigned half_need = DIV_ROUND_UP(max_pressure->half, 4);
+      unsigned full_max = MIN2(limit_pressure->full / (2 * 4),
+                               (budget - 1) / 2);
+      unsigned full = MIN2(full_need, full_max);
+      unsigned half = budget - 2 * full;
+
+      if (half_need > half && full > 1) {
+         /* rather some of both to spill than all of the half ones */
+         unsigned share = MIN2(half_need, budget / 4);
+         if (share > half) {
+            full = (budget - share) / 2;
+            half = budget - 2 * full;
+         }
+      }
+
+      limit_pressure->full = MIN2(limit_pressure->full, full * 2 * 4);
+      limit_pressure->half = MIN2(limit_pressure->half, half * 4);
    }
 }
 
@@ -2657,7 +2680,7 @@ ir3_ra(struct ir3_shader_variant *v)
    limit_pressure.shared_half = RA_SHARED_HALF_SIZE;
 
    if (gl_shader_stage_is_compute(v->type) && v->has_barrier) {
-      calc_limit_pressure_for_cs_with_barrier(v, &limit_pressure);
+      calc_limit_pressure_for_cs_with_barrier(v, &max_pressure, &limit_pressure);
    }
 
    /* If the user forces a doubled threadsize, we may have to lower the limit
@@ -2725,8 +2748,12 @@ ir3_ra(struct ir3_shader_variant *v)
       ctx->full.size = MIN2(ctx->full.size, ALIGN_POT(limit_pressure.full, 2 * 4));
    d("full size: %u", ctx->full.size);
 
-   if (!v->mergedregs)
+   if (!v->mergedregs) {
       ctx->half.size = ra_half_size(v);
+      /* a5xx: kept within the limit, as the full registers above */
+      if (v->compiler->gen == 5)
+         ctx->half.size = MIN2(ctx->half.size, limit_pressure.half);
+   }
 
    ctx->shared.size = RA_SHARED_SIZE;
 
