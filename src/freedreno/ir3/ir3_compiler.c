@@ -298,6 +298,12 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
    /* Set up nir shader compiler options, using device-specific overrides of our base settings. */
    compiler->nir_options = ir3_base_options;
 
+   /* one device: gl_DeviceIndex is 0 (there is no system value for it,
+    * nir_lower_system_values() asserted on it for a5xx)
+    */
+   if (compiler->gen >= 5)
+      compiler->nir_options.lower_device_index_to_zero = true;
+
    if (compiler->gen >= 6) {
       compiler->nir_options.vectorize_io = true,
       compiler->nir_options.force_indirect_unrolling = nir_var_all,
