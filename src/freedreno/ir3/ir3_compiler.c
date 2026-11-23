@@ -154,8 +154,14 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
    compiler->has_branch_and_or = false;
    compiler->has_rpt_bary_f = false;
 
-   if (compiler->gen >= 6) {
+   /* a5xx too: samgq outside the fragment shader samples at the wrong lod
+    * (dEQP-VK.texture.subgroup_lod.texturegrad, textureGrad in a vertex
+    * shader)
+    */
+   if (compiler->gen >= 5)
       compiler->samgq_workaround = true;
+
+   if (compiler->gen >= 6) {
       /* a6xx split the pipeline state into geometry and fragment state, in
        * order to let the VS run ahead of the FS. As a result there are now
        * separate const files for the the fragment shader and everything
