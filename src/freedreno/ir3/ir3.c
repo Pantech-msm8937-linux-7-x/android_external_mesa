@@ -146,16 +146,15 @@ ir3_should_double_threadsize(struct ir3_shader_variant *v, unsigned regs_count)
                    compiler->threadsize_base * compiler->max_waves;
       }
 
-      /* The a5xx blob uses the doubled threadsize for every compute shader
-       * the registers of which allow it: with the smaller one, workgroups of
-       * 289 to 511 invocations fault on Adreno 505 (those of 512 or less do
-       * not need it to fit).
+      /* a5xx: with the smaller threadsize, workgroups of 289 to 511
+       * invocations fault on Adreno 505, these take the doubled one (the
+       * blob takes it for every compute shader of few registers). The
+       * smaller workgroups keep the smaller one: with the doubled one,
+       * shaders of 24 registers faulted (dEQP-VK.ssbo.layout.*), and the
+       * blob has the smaller one from 18 registers.
        */
       if (compiler->gen == 5) {
-         return v->local_size_variable ||
-                threads_per_wg >
-                   compiler->threadsize_base * compiler->max_waves ||
-                regs_count * 2 <= compiler->reg_size_vec4;
+         return v->local_size_variable || threads_per_wg > 256;
       }
 
       /* On a6xx, we prefer the larger threadsize unless the workgroup is

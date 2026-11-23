@@ -2582,15 +2582,14 @@ calc_limit_pressure_for_cs_with_barrier(struct ir3_shader_variant *v,
    uint32_t vec4_regs_per_thread =
       compiler->reg_size_vec4 / (waves_per_wg * (double_threadsize ? 2 : 1));
 
-   /* a5xx: measured on Adreno 505, a workgroup with a barrier runs when its
-    * waves of 64 invocations (32 with the smaller threadsize, which count
-    * as much) take at most 28 vec4 registers per invocation in all, it
-    * faults past that.
+   /* a5xx: measured on Adreno 505 with the doubled threadsize, a workgroup
+    * with a barrier runs when its waves of 64 invocations take at most 28
+    * vec4 registers per invocation in all, it faults past that. (With the
+    * smaller threadsize, 256 invocations of 6 registers run.)
     */
-   if (compiler->gen == 5) {
+   if (compiler->gen == 5 && double_threadsize) {
       unsigned waves64 = DIV_ROUND_UP(threads_per_wg,
-                                      compiler->threadsize_base *
-                                      (double_threadsize ? 2 : 1));
+                                      compiler->threadsize_base * 2);
       vec4_regs_per_thread = MIN2(vec4_regs_per_thread, 28 / waves64);
    }
    assert(vec4_regs_per_thread > 0);
