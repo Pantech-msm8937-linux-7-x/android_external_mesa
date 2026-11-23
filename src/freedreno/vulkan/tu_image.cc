@@ -725,8 +725,11 @@ tu_image_init(struct tu_device *device, struct tu_image *image,
         !tu5_format_tileable(vk_format_to_pipe_format(image->vk.format))))
       image->force_linear_tile = true;
 
-   /* No sense in tiling a 1D image, you'd just waste space and cache locality. */
-   if (pCreateInfo->imageType == VK_IMAGE_TYPE_1D) {
+   /* No sense in tiling a 1D image, you'd just waste space and cache locality.
+    * But Adreno 5xx renders depth and stencil tiled.
+    */
+   if (pCreateInfo->imageType == VK_IMAGE_TYPE_1D &&
+       !(tu_is_a5xx(device) && vk_format_is_depth_or_stencil(image->vk.format))) {
       image->force_linear_tile = true;
    }
 
