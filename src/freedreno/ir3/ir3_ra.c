@@ -2581,12 +2581,25 @@ calc_limit_pressure_for_cs_with_barrier(struct ir3_shader_variant *v,
 
    uint32_t vec4_regs_per_thread =
       compiler->reg_size_vec4 / (waves_per_wg * (double_threadsize ? 2 : 1));
+
+   /* a5xx: measured on Adreno 505, a workgroup with a barrier runs when its
+    * waves of 64 invocations (32 with the smaller threadsize, which count
+    * as much) take at most 28 vec4 registers per invocation in all, it
+    * faults past that.
+    */
+   if (compiler->gen == 5) {
+      unsigned waves64 = DIV_ROUND_UP(threads_per_wg,
+                                      compiler->threadsize_base *
+                                      (double_threadsize ? 2 : 1));
+      vec4_regs_per_thread = MIN2(vec4_regs_per_thread, 28 / waves64);
+   }
    assert(vec4_regs_per_thread > 0);
 
    uint32_t half_regs_per_thread = vec4_regs_per_thread * 4 * 2;
 
    if (limit_pressure->full > half_regs_per_thread) {
-      if (v->mergedregs) {
+      if (v->mergedregs || compiler->gen == 5) {
+         /* (a5xx: the full registers are what is measured above) */
          limit_pressure->full = half_regs_per_thread;
       } else {
          /* TODO: Handle !mergedregs case, probably we would have to do this
@@ -2708,6 +2721,9 @@ ir3_ra(struct ir3_shader_variant *v)
    ctx->blocks = rzalloc_array(ctx, struct ra_block_state, live->block_count);
 
    ctx->full.size = calc_target_full_pressure(v, max_pressure.full);
+   /* the target of a5xx may go past what a workgroup with a barrier fits */
+   if (v->compiler->gen == 5)
+      ctx->full.size = MIN2(ctx->full.size, ALIGN_POT(limit_pressure.full, 2 * 4));
    d("full size: %u", ctx->full.size);
 
    if (!v->mergedregs)

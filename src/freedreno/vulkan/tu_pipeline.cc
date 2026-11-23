@@ -4319,6 +4319,13 @@ tu_compute_pipeline_create(VkDevice device,
                                require_full_subgroups, subgroup_info,
                                dev);
 
+   /* Adreno 5xx: the subgroups are of one invocation, the threadsize is not
+    * seen. The compiler takes the doubled one when it can, as the blob
+    * (workgroups of more than 288 invocations fault with the smaller one).
+    */
+   if (tu_is_a5xx(dev))
+      key.api_wavesize = key.real_wavesize = IR3_SINGLE_OR_DOUBLE;
+
    struct vk_pipeline_robustness_state rs;
    vk_pipeline_robustness_state_fill(&dev->vk, &rs,
                                      pCreateInfo->pNext,
