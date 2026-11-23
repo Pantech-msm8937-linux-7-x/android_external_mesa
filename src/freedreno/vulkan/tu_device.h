@@ -332,6 +332,10 @@ struct tu_device
     * sizes.
     */
    struct tu_bo *a5xx_vsc_bo;
+   /* Adreno 5xx: where the built-in border colors packed for the 4444
+    * formats with alpha in the low bits begin, see TU5_TEX_FLAG_ALPHA_LOW
+    */
+   uint32_t a5xx_bcolor_alpha_low;
    struct tu6_global *global_bo_map;
 
    uint32_t implicit_sync_bo_count;
