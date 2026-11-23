@@ -11,6 +11,7 @@
 
 #include "tu_device.h"
 #include "tu_util.h"
+#include "tu5.h"
 
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_CreateSampler(VkDevice _device,
@@ -55,9 +56,16 @@ tu_CreateSampler(VkDevice _device,
          color.uint32[1] = color.uint32[0];
       }
 
-      tu6_pack_border_color(
-         &device->global_bo_map->bcolor[border_color], &color,
-         pCreateInfo->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT);
+      if (tu_is_a5xx(device)) {
+         tu5_pack_border_color_format(
+            &device->global_bo_map->bcolor[border_color], &color,
+            pCreateInfo->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT,
+            sampler->vk.format);
+      } else {
+         tu6_pack_border_color(
+            &device->global_bo_map->bcolor[border_color], &color,
+            pCreateInfo->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT);
+      }
       border_color += TU_BORDER_COLOR_BUILTIN;
    }
 
