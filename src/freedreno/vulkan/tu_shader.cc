@@ -3097,6 +3097,7 @@ tu_shader_create(struct tu_device *dev,
       .push_consts_type = shader->const_state.push_consts.type,
       .push_consts_base = shader->const_state.push_consts.lo,
       .push_consts_dwords = shader->const_state.push_consts.dwords,
+      .min_num_textures = shader->const_state.a5xx.count[TU5_DESC_TEXTURE],
       .nir_options = nir_options,
    };
 

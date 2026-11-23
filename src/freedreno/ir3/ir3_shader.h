@@ -570,6 +570,12 @@ struct ir3_shader_options {
    uint32_t push_consts_base;
    uint32_t push_consts_dwords;
 
+   /* The textures the driver numbered, at least: the images read as
+    * textures come after them (a5xx turnip also reads the input attachments,
+    * which are no texture variables, as textures)
+    */
+   unsigned min_num_textures;
+
    struct ir3_shader_nir_options nir_options;
 };
 
