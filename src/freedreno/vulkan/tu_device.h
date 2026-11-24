@@ -395,6 +395,12 @@ struct tu_device
    /* map bo handles to bo list index: */
    uint32_t bo_count, bo_list_size;
    mtx_t bo_mutex;
+
+   /* Adreno 5xx: the blocks small allocations of each memory type are cut
+    * out of, see tu_mem_suballoc()
+    */
+   mtx_t mem_block_mutex;
+   struct list_head mem_blocks[VK_MAX_MEMORY_TYPES];
    /* protects imported BOs creation/freeing */
    struct u_rwlock dma_bo_lock;
 
@@ -472,11 +478,27 @@ struct tu_device
 };
 VK_DEFINE_HANDLE_CASTS(tu_device, vk.base, VkDevice, VK_OBJECT_TYPE_DEVICE)
 
+/* A BO small allocations are cut out of. Every BO costs each submit, which
+ * passes all of them to the kernel: Skia allocates its buffers and images
+ * in many allocations of 64 KiB and so.
+ */
+struct tu_mem_block
+{
+   struct list_head link;
+   struct tu_bo *bo;
+   struct util_vma_heap heap;
+   uint64_t used;
+};
+
 struct tu_device_memory
 {
    struct vk_device_memory vk;
 
    struct tu_bo *bo;
+   /* Cut out of a block: where in its BO, and the bytes taken there */
+   struct tu_mem_block *block;
+   uint64_t bo_offset;
+   uint64_t block_size;
 
    /* for dedicated allocations */
    struct tu_image *image;

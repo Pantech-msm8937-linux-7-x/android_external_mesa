@@ -159,7 +159,7 @@ tu_BindBufferMemory2(VkDevice device,
 
       if (mem) {
          buffer->bo = mem->bo;
-         buffer->iova = mem->bo->iova + pBindInfos[i].memoryOffset;
+         buffer->iova = mem->bo->iova + mem->bo_offset + pBindInfos[i].memoryOffset;
          if (buffer->vk.usage &
              (VK_BUFFER_USAGE_2_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT |
               VK_BUFFER_USAGE_2_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT))

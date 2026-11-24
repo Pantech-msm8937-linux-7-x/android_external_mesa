@@ -1035,7 +1035,7 @@ tu_BindImageMemory2(VkDevice _device,
             unsigned plane =
                tu6_plane_index(image->vk.format, plane_info->planeAspect);
 
-            image->plane_base[plane] = mem->bo->iova +
+            image->plane_base[plane] = mem->bo->iova + mem->bo_offset +
                                        pBindInfos[i].memoryOffset -
                                        tu_image_plane_start(image, plane);
             if (plane)
@@ -1043,8 +1043,8 @@ tu_BindImageMemory2(VkDevice _device,
          }
 
          image->bo = mem->bo;
-         image->bo_offset = pBindInfos[i].memoryOffset;
-         image->iova = mem->bo->iova + pBindInfos[i].memoryOffset;
+         image->bo_offset = mem->bo_offset + pBindInfos[i].memoryOffset;
+         image->iova = mem->bo->iova + mem->bo_offset + pBindInfos[i].memoryOffset;
 
          if (image->vk.usage & (VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT |
                                 VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT)) {
@@ -1057,7 +1057,7 @@ tu_BindImageMemory2(VkDevice _device,
                }
             }
 
-            image->map = (char *)mem->bo->map + pBindInfos[i].memoryOffset;
+            image->map = (char *)mem->bo->map + mem->bo_offset + pBindInfos[i].memoryOffset;
          } else {
             image->map = NULL;
          }

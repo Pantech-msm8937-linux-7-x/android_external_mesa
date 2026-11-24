@@ -2808,6 +2808,9 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    device->vk.check_status = tu_device_check_status;
 
    mtx_init(&device->bo_mutex, mtx_plain);
+   mtx_init(&device->mem_block_mutex, mtx_plain);
+   for (unsigned i = 0; i < ARRAY_SIZE(device->mem_blocks); i++)
+      list_inithead(&device->mem_blocks[i]);
    mtx_init(&device->pipeline_mutex, mtx_plain);
    mtx_init(&device->autotune_mutex, mtx_plain);
    mtx_init(&device->kgsl_profiling_mutex, mtx_plain);
@@ -3237,6 +3240,15 @@ tu_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
       tu_bo_finish(device, device->a5xx_vsc_bo);
    tu_bo_finish(device, device->global_bo);
 
+   for (unsigned i = 0; i < ARRAY_SIZE(device->mem_blocks); i++) {
+      list_for_each_entry_safe(struct tu_mem_block, block,
+                               &device->mem_blocks[i], link) {
+         util_vma_heap_finish(&block->heap);
+         tu_bo_finish(device, block->bo);
+         vk_free(&device->vk.alloc, block);
+      }
+   }
+
    for (unsigned i = 0; i < TU_MAX_QUEUE_FAMILIES; i++) {
       for (unsigned q = 0; q < device->queue_count[i]; q++)
          tu_queue_finish(&device->queues[i][q]);
@@ -3373,6 +3385,110 @@ tu_report_device_memory(struct tu_device *device,
                                          device->memory_reports[i].data);
 }
 
+/* Adreno 5xx: allocations up to this size are cut out of blocks of the
+ * other size, which are freed again when empty unless the last one.
+ */
+#define TU_MEM_SUBALLOC_MAX (384 * 1024)
+#define TU_MEM_BLOCK_SIZE (4 * 1024 * 1024)
+/* what images need of their memory, see fdl5 base_align */
+#define TU_MEM_SUBALLOC_ALIGN 4096
+/* util_vma_heap gives 0 for failure: the offsets start above it */
+#define TU_MEM_BLOCK_BASE TU_MEM_SUBALLOC_ALIGN
+
+static VkResult
+tu_mem_suballoc(struct tu_device *device, struct tu_device_memory *mem,
+                uint64_t size, uint32_t type)
+{
+   uint64_t aligned = align64(size, TU_MEM_SUBALLOC_ALIGN);
+   struct tu_mem_block *found = NULL;
+   uint64_t offset = 0;
+
+   mtx_lock(&device->mem_block_mutex);
+
+   list_for_each_entry(struct tu_mem_block, block, &device->mem_blocks[type],
+                       link) {
+      offset = util_vma_heap_alloc(&block->heap, aligned,
+                                   TU_MEM_SUBALLOC_ALIGN);
+      if (offset) {
+         found = block;
+         break;
+      }
+   }
+
+   if (!found) {
+      struct tu_mem_block *block = (struct tu_mem_block *)
+         vk_zalloc(&device->vk.alloc, sizeof(*block), 8,
+                   VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+      if (!block) {
+         mtx_unlock(&device->mem_block_mutex);
+         return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+      }
+
+      VkResult result = tu_bo_init_new_explicit_iova(
+         device, NULL, &block->bo, TU_MEM_BLOCK_SIZE, 0,
+         device->physical_device->memory.types[type], TU_BO_ALLOC_NO_FLAGS,
+         "vkAllocateMemory() block");
+      if (result != VK_SUCCESS) {
+         vk_free(&device->vk.alloc, block);
+         mtx_unlock(&device->mem_block_mutex);
+         return result;
+      }
+
+      util_vma_heap_init(&block->heap, TU_MEM_BLOCK_BASE, TU_MEM_BLOCK_SIZE);
+      /* the lowest offsets first, for the block to empty from the top */
+      block->heap.alloc_high = false;
+      list_add(&block->link, &device->mem_blocks[type]);
+
+      offset = util_vma_heap_alloc(&block->heap, aligned,
+                                   TU_MEM_SUBALLOC_ALIGN);
+      assert(offset);
+      found = block;
+   }
+
+   found->used += aligned;
+   mtx_unlock(&device->mem_block_mutex);
+
+   mem->bo = found->bo;
+   mem->block = found;
+   mem->bo_offset = offset - TU_MEM_BLOCK_BASE;
+   mem->block_size = aligned;
+   return VK_SUCCESS;
+}
+
+static void
+tu_mem_subfree(struct tu_device *device, struct tu_device_memory *mem)
+{
+   struct tu_mem_block *block = mem->block;
+   uint32_t type = mem->vk.memory_type_index;
+
+   mtx_lock(&device->mem_block_mutex);
+
+   util_vma_heap_free(&block->heap, mem->bo_offset + TU_MEM_BLOCK_BASE,
+                      mem->block_size);
+   block->used -= mem->block_size;
+
+   /* an empty block goes, unless it is the only one of the type */
+   bool last = device->mem_blocks[type].next == &block->link &&
+               device->mem_blocks[type].prev == &block->link;
+   if (!block->used && !last) {
+      list_del(&block->link);
+      util_vma_heap_finish(&block->heap);
+      tu_bo_finish(device, block->bo);
+      vk_free(&device->vk.alloc, block);
+   }
+
+   mtx_unlock(&device->mem_block_mutex);
+}
+
+/* The bytes of the memory, which those of its BO are not when cut out of a
+ * block
+ */
+static uint64_t
+tu_mem_size(const struct tu_device_memory *mem)
+{
+   return mem->block ? mem->block_size : mem->bo->size;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_AllocateMemory(VkDevice _device,
                   const VkMemoryAllocateInfo *pAllocateInfo,
@@ -3469,7 +3585,24 @@ tu_AllocateMemory(VkDevice _device,
          alloc_flags |= TU_BO_ALLOC_SHAREABLE;
 
 
+      const struct wsi_memory_allocate_info *wsi =
+         vk_find_struct_const(pAllocateInfo->pNext,
+                              WSI_MEMORY_ALLOCATE_INFO_MESA);
+      /* Dedicated allocations too, which Skia makes of all that is more
+       * than half its blocks of 64 KiB: what is not exported needs no BO of
+       * its own.
+       */
+      bool suballoc = tu_is_a5xx(device) &&
+                      pAllocateInfo->allocationSize <= TU_MEM_SUBALLOC_MAX &&
+                      alloc_flags == TU_BO_ALLOC_NO_FLAGS && !export_info &&
+                      !wsi &&
+                      !device->vk.enabled_features.memoryMapPlaced;
+
       char name[64] = "vkAllocateMemory()";
+      if (suballoc) {
+         result = tu_mem_suballoc(device, mem, pAllocateInfo->allocationSize,
+                                  pAllocateInfo->memoryTypeIndex);
+      } else {
       if (device->bo_sizes)
          snprintf(name, ARRAY_SIZE(name), "vkAllocateMemory(%ldkb)",
                   (long)DIV_ROUND_UP(pAllocateInfo->allocationSize, 1024));
@@ -3478,13 +3611,17 @@ tu_AllocateMemory(VkDevice _device,
       result = tu_bo_init_new_explicit_iova(
          device, &mem->vk.base, &mem->bo, pAllocateInfo->allocationSize,
          client_address, mem_property, alloc_flags, name);
+      }
    }
 
    if (result == VK_SUCCESS) {
-      mem_heap_used = p_atomic_add_return(&mem_heap->used, mem->bo->size);
+      mem_heap_used = p_atomic_add_return(&mem_heap->used, tu_mem_size(mem));
       if (mem_heap_used > mem_heap->size) {
-         p_atomic_add(&mem_heap->used, -mem->bo->size);
-         tu_bo_finish(device, mem->bo);
+         p_atomic_add(&mem_heap->used, -tu_mem_size(mem));
+         if (mem->block)
+            tu_mem_subfree(device, mem);
+         else
+            tu_bo_finish(device, mem->bo);
          result = vk_errorf(device, VK_ERROR_OUT_OF_DEVICE_MEMORY,
                             "Out of heap memory");
       }
@@ -3529,7 +3666,7 @@ tu_AllocateMemory(VkDevice _device,
                            mem->imported
                               ? VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_IMPORT_EXT
                               : VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_ALLOCATE_EXT,
-                           mem->bo, mem->bo->size, (uint64_t) *pMem,
+                           mem->bo, tu_mem_size(mem), (uint64_t) *pMem,
                            VK_OBJECT_TYPE_DEVICE_MEMORY);
 
    return VK_SUCCESS;
@@ -3552,11 +3689,14 @@ tu_FreeMemory(VkDevice _device,
                            mem->imported
                               ? VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_UNIMPORT_EXT
                               : VK_DEVICE_MEMORY_REPORT_EVENT_TYPE_FREE_EXT,
-                           mem->bo, mem->bo->size, (uint64_t) _mem,
+                           mem->bo, tu_mem_size(mem), (uint64_t) _mem,
                            VK_OBJECT_TYPE_DEVICE_MEMORY);
 
-   p_atomic_add(&device->physical_device->heap.used, -mem->bo->size);
-   tu_bo_finish(device, mem->bo);
+   p_atomic_add(&device->physical_device->heap.used, -tu_mem_size(mem));
+   if (mem->block)
+      tu_mem_subfree(device, mem);
+   else
+      tu_bo_finish(device, mem->bo);
    vk_device_memory_destroy(&device->vk, pAllocator, &mem->vk);
 }
 
@@ -3580,11 +3720,18 @@ tu_MapMemory2KHR(VkDevice _device, const VkMemoryMapInfoKHR *pMemoryMapInfo, voi
       placed_addr = placed_info->pPlacedAddress;
    }
 
-   result = tu_bo_map(device, mem->bo, placed_addr);
+   /* a block stays mapped, for all that is cut out of it */
+   if (mem->block) {
+      mtx_lock(&device->mem_block_mutex);
+      result = mem->bo->map ? VK_SUCCESS : tu_bo_map(device, mem->bo, NULL);
+      mtx_unlock(&device->mem_block_mutex);
+   } else {
+      result = tu_bo_map(device, mem->bo, placed_addr);
+   }
    if (result != VK_SUCCESS)
       return result;
 
-   *ppData = (char *) mem->bo->map + pMemoryMapInfo->offset;
+   *ppData = (char *) mem->bo->map + mem->bo_offset + pMemoryMapInfo->offset;
    return VK_SUCCESS;
 }
 
@@ -3594,7 +3741,7 @@ tu_UnmapMemory2KHR(VkDevice _device, const VkMemoryUnmapInfoKHR *pMemoryUnmapInf
    VK_FROM_HANDLE(tu_device, device, _device);
    VK_FROM_HANDLE(tu_device_memory, mem, pMemoryUnmapInfo->memory);
 
-   if (mem == NULL)
+   if (mem == NULL || mem->block)
       return VK_SUCCESS;
 
    return tu_bo_unmap(device, mem->bo, pMemoryUnmapInfo->flags & VK_MEMORY_UNMAP_RESERVE_BIT_EXT);
@@ -3615,7 +3762,11 @@ sync_cache(VkDevice _device,
 
    for (uint32_t i = 0; i < count; i++) {
       VK_FROM_HANDLE(tu_device_memory, mem, ranges[i].memory);
-      tu_bo_sync_cache(device, mem->bo, ranges[i].offset, ranges[i].size, op);
+      VkDeviceSize size = ranges[i].size;
+      if (mem->block && size == VK_WHOLE_SIZE)
+         size = mem->block_size - ranges[i].offset;
+      tu_bo_sync_cache(device, mem->bo, mem->bo_offset + ranges[i].offset,
+                       size, op);
    }
 
    return VK_SUCCESS;
@@ -3806,7 +3957,7 @@ uint64_t tu_GetDeviceMemoryOpaqueCaptureAddress(
     const VkDeviceMemoryOpaqueCaptureAddressInfo* pInfo)
 {
    VK_FROM_HANDLE(tu_device_memory, mem, pInfo->memory);
-   return mem->bo->iova;
+   return mem->bo->iova + mem->bo_offset;
 }
 
 struct tu_debug_bos_entry {
