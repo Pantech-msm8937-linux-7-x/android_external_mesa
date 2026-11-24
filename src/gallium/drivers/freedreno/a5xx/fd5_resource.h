@@ -12,5 +12,6 @@
 #include "freedreno_resource.h"
 
 uint32_t fd5_setup_slices(struct fd_resource *rsc);
+void fd5_resource_screen_init(struct pipe_screen *pscreen);
 
 #endif /* FD5_RESOURCE_H_ */

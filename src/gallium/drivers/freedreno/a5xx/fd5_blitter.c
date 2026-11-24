@@ -80,6 +80,11 @@ can_do_blit(const struct pipe_blit_info *info)
     * untiling by setting both src and dst COLOR_SWAP=WZYX, but that
     * means the formats must match:
     */
+   /* not UBWC, which the 2D blits know nothing of */
+   if (fd_resource(info->dst.resource)->layout.ubwc ||
+       fd_resource(info->src.resource)->layout.ubwc)
+      return false;
+
    if ((fd_resource(info->dst.resource)->layout.tile_mode ||
         fd_resource(info->src.resource)->layout.tile_mode) &&
        info->dst.format != info->src.format)
