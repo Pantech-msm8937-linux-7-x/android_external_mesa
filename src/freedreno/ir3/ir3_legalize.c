@@ -1137,6 +1137,20 @@ mark_jp(struct ir3_block *block)
 
    struct ir3_instruction *target =
       list_first_entry(&block->instr_list, struct ir3_instruction, node);
+
+   /* a5xx: (jp) on the end itself does not reconverge the threads parked
+    * there with those still in a loop: the wave hung at times, depending on
+    * what had run before (dEQP-VK.spirv_assembly.instruction.graphics.
+    * variable_pointers.graphics.writes_single_buffer_vert after the reads
+    * cases). The blob reconverges on a nop before the end.
+    */
+   if (block->shader->compiler->gen == 5 && target->opc == OPC_END) {
+      struct ir3_instruction *nop = ir3_NOP(block);
+      list_delinit(&nop->node);
+      list_add(&nop->node, &block->instr_list);
+      target = nop;
+   }
+
    target->flags |= IR3_INSTR_JP;
 }
 
