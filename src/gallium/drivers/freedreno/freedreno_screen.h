@@ -58,6 +58,9 @@ struct fd6_gmem_config {
 struct fd_screen {
    struct pipe_screen base;
 
+   /* the highest bank bit of the memory, which UBWC is laid out by */
+   uint32_t highest_bank_bit;
+
    struct list_head context_list;
 
    simple_mtx_t lock;

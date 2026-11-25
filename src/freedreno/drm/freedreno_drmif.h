@@ -47,6 +47,7 @@ enum fd_param_id {
    FD_SUSPEND_COUNT, /* # of times the GPU has suspended, and potentially lost state */
    FD_SYSPROF,       /* Settable (for CAP_SYS_ADMIN) param for system profiling */
    FD_VA_SIZE,       /* GPU virtual address size */
+   FD_HIGHEST_BANK_BIT, /* the highest bank bit of the memory, for UBWC */
 };
 
 /**

@@ -84,6 +84,8 @@ msm_pipe_get_param(struct fd_pipe *pipe, enum fd_param_id param,
       return query_param(pipe, MSM_PARAM_SUSPENDS, value);
    case FD_VA_SIZE:
       return query_param(pipe, MSM_PARAM_VA_SIZE, value);
+   case FD_HIGHEST_BANK_BIT:
+      return query_param(pipe, MSM_PARAM_HIGHEST_BANK_BIT, value);
    default:
       ERROR_MSG("invalid param id: %d", param);
       return -1;
