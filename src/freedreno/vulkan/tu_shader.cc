@@ -362,7 +362,7 @@ tu5_desc_base(struct tu_shader *shader,
                         (type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
                          type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC);
 
-   struct tu5_desc_map *map = &shader->const_state.a5xx;
+   struct tu5_desc_map *map = shader->const_state.a5xx;
    const struct tu_descriptor_set_binding_layout *binding_layout =
       &layout->set[set].layout->binding[binding];
 
@@ -470,7 +470,7 @@ lower_vulkan_resource_index(struct tu_device *dev, nir_builder *b,
        * these read theirs through pointers, as uniform buffers. See
        * lower_ssbo_ubo_intrinsic().
        */
-      const bool vs_ibo = shader->const_state.a5xx.vs_ibo;
+      const bool vs_ibo = shader->const_state.a5xx->vs_ibo;
       if (b->shader->info.stage == MESA_SHADER_VERTEX && !vs_ibo)
          ubo = true;
 
@@ -598,7 +598,7 @@ lower_ssbo_ubo_intrinsic(struct tu_device *dev,
       /* The buffers are numbered, see lower_vulkan_resource_index() */
       const bool vs_ibo =
          b->shader->info.stage == MESA_SHADER_VERTEX &&
-         shader->const_state.a5xx.vs_ibo;
+         shader->const_state.a5xx->vs_ibo;
 
       if (b->shader->info.stage == MESA_SHADER_VERTEX && !vs_ibo &&
           intrin->intrinsic == nir_intrinsic_load_ssbo) {
@@ -1037,14 +1037,14 @@ lower_image_deref(struct tu_device *dev, nir_builder *b,
          unsigned count = layout->set[var->data.descriptor_set]
                              .layout->binding[var->data.binding].array_size;
          for (unsigned i = 0; i < count && first + i < TU5_MAX_IMAGES; i++)
-            shader->const_state.a5xx.image[first + i].real_format = true;
+            shader->const_state.a5xx->image[first + i].real_format = true;
       }
       nir_def *index = deref->deref_type == nir_deref_type_var
                           ? nir_imm_int(b, first)
                           : nir_iadd_imm(b, deref->arr.index.ssa, first);
       /* the slots of the vertex shader follow those of the fragment shader */
       if (b->shader->info.stage == MESA_SHADER_VERTEX &&
-          shader->const_state.a5xx.vs_ibo)
+          shader->const_state.a5xx->vs_ibo)
          index = nir_iadd(b, index, tu5_ibo_base(b, shader));
 
       shader->active_desc_sets |= 1u << var->data.descriptor_set;
@@ -1430,7 +1430,7 @@ lower_tex(nir_builder *b, nir_tex_instr *tex, struct tu_device *dev,
       if (nir_src_is_const(*samp) && nir_src_is_const(*texture)) {
          unsigned s = nir_src_as_uint(*samp);
          unsigned t = nir_src_as_uint(*texture) + 1;
-         uint8_t *pair = &shader->const_state.a5xx.samp_tex[s];
+         uint8_t *pair = &shader->const_state.a5xx->samp_tex[s];
 
          if (s < TU5_MAX_SAMPLERS && t < 0xff)
             *pair = (*pair == 0 || *pair == t) ? t : 0xff;
@@ -1823,7 +1823,7 @@ tu5_vs_ibo_count(nir_shader *shader, const struct tu_pipeline_layout *layout)
 static nir_def *
 tu5_ibo_base(nir_builder *b, const struct tu_shader *shader)
 {
-   return nir_imm_int(b, shader->const_state.a5xx.vs_ibo_base);
+   return nir_imm_int(b, shader->const_state.a5xx->vs_ibo_base);
 }
 
 static bool
@@ -1901,24 +1901,26 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
                       push_consts_vec4, offset_align_vec4);
    }
 
-   const_state->a5xx.vs_ibo = tu_is_a5xx(dev) && tu5_vs_uses_ibo(shader);
-   if (const_state->a5xx.vs_ibo) {
+   if (tu_is_a5xx(dev))
+      const_state->a5xx->vs_ibo = tu5_vs_uses_ibo(shader);
+   if (tu_is_a5xx(dev) && const_state->a5xx->vs_ibo) {
       unsigned count = tu5_vs_ibo_count(shader, layout);
       if (count > TU5_GFX_IBO_SLOTS)
          mesa_loge("a5xx: %u storage slots in a vertex shader", count);
-      const_state->a5xx.vs_ibo_base =
+      const_state->a5xx->vs_ibo_base =
          TU5_GFX_IBO_SLOTS - MIN2(count, TU5_GFX_IBO_SLOTS);
    }
 
-   const_state->a5xx.view_loc = ~0u;
+   if (tu_is_a5xx(dev))
+      const_state->a5xx->view_loc = ~0u;
    if (tu_is_a5xx(dev) && tu5_uses_view_index(shader)) {
       ir3_const_alloc(const_allocs, IR3_CONST_ALLOC_VIEW_INDEX,
                       dev->compiler->const_upload_unit, 1);
-      const_state->a5xx.view_loc =
+      const_state->a5xx->view_loc =
          const_allocs->consts[IR3_CONST_ALLOC_VIEW_INDEX].offset_vec4 * 4;
       nir_shader_intrinsics_pass(shader, tu5_lower_view_index,
                                  nir_metadata_control_flow,
-                                 &const_state->a5xx.view_loc);
+                                 &const_state->a5xx->view_loc);
    }
 
    bool unknown_dynamic_size = false;
@@ -2057,9 +2059,9 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
 
    /* The pointers to the uniform buffers are constants of the shader */
    if (tu_is_a5xx(dev)) {
-      shader->info.num_ubos = const_state->a5xx.count[TU5_DESC_UBO];
-      shader->info.num_ssbos = const_state->a5xx.count[TU5_DESC_SSBO];
-      shader->info.num_images = const_state->a5xx.count[TU5_DESC_IMAGE];
+      shader->info.num_ubos = const_state->a5xx->count[TU5_DESC_UBO];
+      shader->info.num_ssbos = const_state->a5xx->count[TU5_DESC_SSBO];
+      shader->info.num_images = const_state->a5xx->count[TU5_DESC_IMAGE];
 
       /* The variables of the textures are kept, for the compiler to count
        * them and to number what it reads the images through after them.
@@ -3770,10 +3772,14 @@ tu_shader_init(struct tu_device *dev, const void *key_data, size_t key_size)
    VK_MULTIALLOC(ma);
    VK_MULTIALLOC_DECL(&ma, struct tu_shader, shader, 1);
    VK_MULTIALLOC_DECL_SIZE(&ma, char, obj_key_data, key_size);
+   VK_MULTIALLOC_DECL(&ma, struct tu5_desc_map, a5xx_map,
+                      tu_is_a5xx(dev) ? 1 : 0);
 
    if (!vk_multialloc_zalloc(&ma, &dev->vk.alloc,
                              VK_SYSTEM_ALLOCATION_SCOPE_DEVICE))
       return NULL;
+
+   shader->const_state.a5xx = tu_is_a5xx(dev) ? a5xx_map : NULL;
 
    if (key_size > 0)
       memcpy(obj_key_data, key_data, key_size);
@@ -3797,6 +3803,9 @@ tu_shader_serialize(struct vk_pipeline_cache_object *object,
       container_of(object, struct tu_shader, base);
 
    blob_write_bytes(blob, &shader->const_state, sizeof(shader->const_state));
+   if (shader->const_state.a5xx)
+      blob_write_bytes(blob, shader->const_state.a5xx,
+                       sizeof(*shader->const_state.a5xx));
    blob_write_bytes(blob, &shader->dynamic_descriptor_sizes,
                     sizeof(shader->dynamic_descriptor_sizes));
    blob_write_uint32(blob, shader->view_mask);
@@ -3842,7 +3851,11 @@ tu_shader_deserialize(struct vk_pipeline_cache *cache,
    if (!shader)
       return NULL;
 
+   struct tu5_desc_map *a5xx_map = shader->const_state.a5xx;
    blob_copy_bytes(blob, &shader->const_state, sizeof(shader->const_state));
+   shader->const_state.a5xx = a5xx_map;
+   if (a5xx_map)
+      blob_copy_bytes(blob, a5xx_map, sizeof(*a5xx_map));
    blob_copy_bytes(blob, &shader->dynamic_descriptor_sizes,
                    sizeof(shader->dynamic_descriptor_sizes));
    shader->view_mask = blob_read_uint32(blob);
@@ -4137,7 +4150,8 @@ tu_shader_create(struct tu_device *dev,
       .push_consts_base = shader->const_state.push_consts.lo_dwords,
       .push_consts_dwords = shader->const_state.push_consts.dwords,
       .const_allocs = const_allocs,
-      .min_num_textures = shader->const_state.a5xx.count[TU5_DESC_TEXTURE],
+      .min_num_textures = tu_is_a5xx(dev) ?
+         shader->const_state.a5xx->count[TU5_DESC_TEXTURE] : 0,
       .nir_options = nir_options,
    };
 

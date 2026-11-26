@@ -121,7 +121,8 @@ struct tu5_desc_map
 
 struct tu_const_state
 {
-   struct tu5_desc_map a5xx;
+   /* Adreno 5xx only, NULL otherwise (allocated with the tu_shader) */
+   struct tu5_desc_map *a5xx;
 
    struct tu_push_constant_range push_consts;
    uint32_t dynamic_offset_loc;
