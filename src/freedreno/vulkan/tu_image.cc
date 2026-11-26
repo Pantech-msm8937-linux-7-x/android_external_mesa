@@ -1273,7 +1273,8 @@ tu_image_bind(struct tu_device *device,
    /* a plane of a disjoint image, in memory of its own */
    const VkBindImagePlaneMemoryInfo *plane_info =
       vk_find_struct_const(bind_info->pNext, BIND_IMAGE_PLANE_MEMORY_INFO);
-   if (plane_info && (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)) {
+   if (tu_is_a5xx(device) && plane_info &&
+       (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)) {
       unsigned plane =
          tu6_plane_index(image->vk.format, plane_info->planeAspect);
 
@@ -1355,7 +1356,8 @@ tu_get_image_memory_requirements(struct tu_device *dev, struct tu_image *image,
    uint64_t size = image->total_size;
 
    /* one plane of a disjoint image */
-   if (plane_aspect && (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)) {
+   if (tu_is_a5xx(dev) && plane_aspect &&
+       (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)) {
       unsigned plane = tu6_plane_index(image->vk.format, plane_aspect);
       size = image->layout[plane].size - tu_image_plane_start(image, plane);
    }
@@ -1616,8 +1618,9 @@ tu_get_image_subresource_layout(struct tu_image *image,
    pLayout->subresourceLayout.offset =
       fdl_surface_offset(layout, pSubresource->imageSubresource.mipLevel,
                          pSubresource->imageSubresource.arrayLayer);
-   /* in the memory of the plane, for a disjoint image */
-   if (image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT)
+   /* in the memory of the plane, for a disjoint image (Adreno 5xx) */
+   if ((image->vk.create_flags & VK_IMAGE_CREATE_DISJOINT_BIT) &&
+       tu_is_a5xx(container_of(image->vk.base.device, struct tu_device, vk)))
       pLayout->subresourceLayout.offset -= tu_image_plane_start(image, plane);
    pLayout->subresourceLayout.rowPitch =
       fdl_pitch(layout, pSubresource->imageSubresource.mipLevel);

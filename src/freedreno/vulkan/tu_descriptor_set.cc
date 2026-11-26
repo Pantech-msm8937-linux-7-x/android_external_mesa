@@ -469,7 +469,8 @@ tu_GetDescriptorSetLayoutBindingOffsetEXT(
 
 static void
 blake3_update_ycbcr_sampler(blake3_hasher *ctx,
-                          const struct vk_ycbcr_conversion_state *sampler)
+                          const struct vk_ycbcr_conversion_state *sampler,
+                          bool a5xx)
 {
    BLAKE3_UPDATE_VALUE(ctx, sampler->ycbcr_model);
    BLAKE3_UPDATE_VALUE(ctx, sampler->ycbcr_range);
@@ -477,6 +478,8 @@ blake3_update_ycbcr_sampler(blake3_hasher *ctx,
    /* Adreno 5xx puts the planes together in the shader, the swizzles and
     * the chroma reconstruction of the conversion included
     */
+   if (!a5xx)
+      return;
    BLAKE3_UPDATE_VALUE(ctx, sampler->mapping);
    BLAKE3_UPDATE_VALUE(ctx, sampler->chroma_offsets);
    BLAKE3_UPDATE_VALUE(ctx, sampler->chroma_filter);
@@ -503,7 +506,10 @@ blake3_update_descriptor_set_binding_layout(blake3_hasher *ctx,
 
    if (ycbcr_samplers) {
       for (unsigned i = 0; i < layout->array_size; i++)
-         blake3_update_ycbcr_sampler(ctx, ycbcr_samplers + i);
+         blake3_update_ycbcr_sampler(
+            ctx, ycbcr_samplers + i,
+            container_of(set_layout->vk.base.device, struct tu_device, vk)
+               ->physical_device->info->chip == 5);
    }
 
    if (samplers) {

@@ -3447,6 +3447,9 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
          TU_BORDER_COLOR_BUILTIN +
          (device->vk.enabled_features.customBorderColors ? TU_BORDER_COLOR_COUNT : 0);
       global_size += TU_BORDER_COLOR_BUILTIN * sizeof(struct bcolor_entry);
+      global_size = align(global_size, 64);
+      device->a5xx_view_bases_offset = global_size;
+      global_size += TU5_VIEW_BASES * sizeof(uint64_t);
    }
 
    tu_bo_suballocator_init(

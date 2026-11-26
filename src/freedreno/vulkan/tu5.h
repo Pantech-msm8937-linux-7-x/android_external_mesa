@@ -13,11 +13,22 @@
 
 #include "tu_common.h"
 
+/* The index of the view among the constants of a shader: in the allocation
+ * of the bindless base addresses, which only the SSBO emulation of a7xx makes
+ * (Adreno 5xx draws the views one after the other, see tu5_bind_view())
+ */
+#define TU5_CONST_ALLOC_VIEW_INDEX IR3_CONST_ALLOC_BINDLESS_BASE_ADDRS
+
+/* The entries of the target addresses of the views in the global BO, see
+ * tu_device::a5xx_view_bases_offset: 16 views (or layers) of 10
+ */
+#define TU5_VIEW_BASES (16 * 10)
+
 /* The dword of the texture descriptors with flags of Adreno 5xx, which
  * reads the first six only
  */
 /* The layers of the table of the targets the primary command buffers write
- * for the secondary ones (tu6_global::a5xx_view_bases)
+ * for the secondary ones (tu_device::a5xx_view_bases_offset)
  */
 #define TU5_MAX_TABLE_LAYERS 16
 

@@ -51,6 +51,8 @@ enum global_shader {
    GLOBAL_SH_FS_BLIT,
    GLOBAL_SH_FS_BLIT_ZSCALE,
    GLOBAL_SH_FS_COPY_MS,
+   GLOBAL_SH_FS_CLEAR0,
+   GLOBAL_SH_FS_CLEAR_MAX = GLOBAL_SH_FS_CLEAR0 + MAX_RTS,
    /* a5xx: the rectangle of clears and blits as a triangle strip, see tu5.h */
    GLOBAL_SH_VS_RECT5,
    /* Adreno 5xx: the first sample, the mean of two, the mean of four */
@@ -63,8 +65,6 @@ enum global_shader {
     * tu5_copy_buffer_rect()
     */
    GLOBAL_SH_FS_COPY_BUF5,
-   GLOBAL_SH_FS_CLEAR0,
-   GLOBAL_SH_FS_CLEAR_MAX = GLOBAL_SH_FS_CLEAR0 + MAX_RTS,
    GLOBAL_SH_COUNT,
 };
 
@@ -230,12 +230,6 @@ struct tu6_global
    uint32_t _pad2;
    uint64_t predicate;
 
-   /* Adreno 5xx, multiview: where each view draws, for the secondary command
-    * buffers, which need not know the framebuffer. For each view, the colour
-    * targets, then the depth and the stencil buffers. See tu5_bind_view().
-    */
-   uint64_t a5xx_view_bases[16 * 10];
-
    /* scratch space for VPC_SO[i].FLUSH_BASE_LO/HI, start on 32 byte boundary. */
    struct {
       uint32_t offset;
@@ -364,6 +358,12 @@ struct tu_device
     * formats with alpha in the low bits begin, see TU5_TEX_FLAG_ALPHA_LOW
     */
    uint32_t a5xx_bcolor_alpha_low;
+   /* Adreno 5xx, multiview: where in the global BO, after the border colors,
+    * each view draws, for the secondary command buffers, which need not know
+    * the framebuffer: for each view, the colour targets, then the depth and
+    * the stencil buffers (TU5_VIEW_BASES). See tu5_bind_view().
+    */
+   uint32_t a5xx_view_bases_offset;
    struct tu6_global *global_bo_map;
 
    struct tu_bo *null_accel_struct_bo;

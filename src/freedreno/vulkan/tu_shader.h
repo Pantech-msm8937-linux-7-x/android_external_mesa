@@ -121,9 +121,6 @@ struct tu5_desc_map
 
 struct tu_const_state
 {
-   /* Adreno 5xx only, NULL otherwise (allocated with the tu_shader) */
-   struct tu5_desc_map *a5xx;
-
    struct tu_push_constant_range push_consts;
    uint32_t dynamic_offset_loc;
    unsigned num_inline_ubos;
@@ -166,6 +163,11 @@ struct tu_shader
    struct tu_draw_state safe_const_binning_state;
 
    struct tu_const_state const_state;
+
+   /* Adreno 5xx only, NULL otherwise: what the shader numbers, allocated
+    * with it (see tu5_desc_base())
+    */
+   struct tu5_desc_map *a5xx;
    uint32_t view_mask;
    uint8_t active_desc_sets;
 
