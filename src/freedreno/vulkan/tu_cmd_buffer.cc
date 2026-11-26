@@ -4140,12 +4140,18 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
       container_of(pool->base.device, struct tu_device, vk);
    struct tu_cmd_buffer *cmd_buffer;
 
+   /* Adreno 5xx: its groups of draw state after the command buffer */
+   const size_t a5xx_size =
+      tu_is_a5xx(device) ? sizeof(struct tu5_cmd_groups) : 0;
    cmd_buffer = (struct tu_cmd_buffer *) vk_zalloc(
-      &pool->alloc, sizeof(*cmd_buffer), 8,
+      &pool->alloc, sizeof(*cmd_buffer) + a5xx_size, 8,
       VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
 
    if (cmd_buffer == NULL)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   if (a5xx_size)
+      cmd_buffer->a5xx_groups = (struct tu5_cmd_groups *) (cmd_buffer + 1);
 
    VkResult result = vk_command_buffer_init(pool, &cmd_buffer->vk,
                                             &tu_cmd_buffer_ops, level);

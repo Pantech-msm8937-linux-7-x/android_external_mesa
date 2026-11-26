@@ -375,7 +375,7 @@ static unsigned
 tu5_ibo_slot_base(const struct tu_shader *shader)
 {
    return shader->variant->type == MESA_SHADER_VERTEX
-             ? shader->const_state.a5xx.vs_ibo_base : 0;
+             ? shader->const_state.a5xx->vs_ibo_base : 0;
 }
 
 /* The textures and the samplers of a shader */
@@ -383,7 +383,7 @@ static void
 tu5_emit_textures(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                   const struct tu_shader *shader)
 {
-   const struct tu5_desc_map *map = &shader->const_state.a5xx;
+   const struct tu5_desc_map *map = shader->const_state.a5xx;
    const struct ir3_ibo_mapping *m = &shader->variant->image_mapping;
    unsigned num_tex = map->count[TU5_DESC_TEXTURE];
    unsigned num_samp = map->count[TU5_DESC_SAMPLER];
@@ -478,7 +478,7 @@ static void
 tu5_emit_ssbos(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                const struct tu_shader *shader)
 {
-   const struct tu5_desc_map *map = &shader->const_state.a5xx;
+   const struct tu5_desc_map *map = shader->const_state.a5xx;
    unsigned count = map->count[TU5_DESC_SSBO];
    enum a4xx_state_block sb;
 
@@ -487,7 +487,7 @@ tu5_emit_ssbos(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
    switch (shader->variant->type) {
    case MESA_SHADER_VERTEX:
-      if (!shader->const_state.a5xx.vs_ibo)
+      if (!shader->const_state.a5xx->vs_ibo)
          return; /* read as uniform buffers */
       FALLTHROUGH;
    case MESA_SHADER_FRAGMENT:
@@ -559,7 +559,7 @@ tu5_emit_images(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 {
    const struct ir3_shader_variant *v = shader->variant;
    const struct ir3_const_state *const_state = ir3_const_state(v);
-   const struct tu5_desc_map *map = &shader->const_state.a5xx;
+   const struct tu5_desc_map *map = shader->const_state.a5xx;
    unsigned count = map->count[TU5_DESC_IMAGE];
    enum a4xx_state_block sb;
 
@@ -568,7 +568,7 @@ tu5_emit_images(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
    switch (v->type) {
    case MESA_SHADER_VERTEX:
-      if (!shader->const_state.a5xx.vs_ibo)
+      if (!shader->const_state.a5xx->vs_ibo)
          return;
       FALLTHROUGH;
    case MESA_SHADER_FRAGMENT:
@@ -650,13 +650,13 @@ static void
 tu5_emit_vs_ibos(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                  const struct tu_shader *vs)
 {
-   if (!vs->const_state.a5xx.vs_ibo)
+   if (!vs->const_state.a5xx->vs_ibo)
       return;
 
    const struct tu_shader *fs = cmd->state.shaders[MESA_SHADER_FRAGMENT];
    if ((fs && fs->variant &&
-        fs->variant->num_uavs > vs->const_state.a5xx.vs_ibo_base) ||
-       vs->const_state.a5xx.vs_ibo_base + vs->variant->num_uavs >
+        fs->variant->num_uavs > vs->const_state.a5xx->vs_ibo_base) ||
+       vs->const_state.a5xx->vs_ibo_base + vs->variant->num_uavs >
           TU5_GFX_IBO_SLOTS)
       mesa_loge("a5xx: too many storage buffers and images in the vertex "
                 "and fragment shaders");
@@ -674,7 +674,7 @@ tu5_emit_user_consts(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 {
    const struct ir3_shader_variant *v = shader->variant;
    const struct ir3_const_state *const_state = ir3_const_state(v);
-   const struct tu5_desc_map *map = &shader->const_state.a5xx;
+   const struct tu5_desc_map *map = shader->const_state.a5xx;
    const struct tu_push_constant_range *push = &shader->const_state.push_consts;
 
    /* the dwords from lo_dwords on, at where the compiler put them */
@@ -961,11 +961,11 @@ tu5_group_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    uint32_t dwords = scratch->cur - buf;
 
    if (known && dwords == cmd->state.a5xx_group_dwords[g] &&
-       !memcmp(buf, cmd->state.a5xx_group[g], dwords * sizeof(uint32_t)))
+       !memcmp(buf, cmd->a5xx_groups->group[g], dwords * sizeof(uint32_t)))
       return;
 
    if (dwords <= TU5_DRAW_GROUP_DWORDS) {
-      memcpy(cmd->state.a5xx_group[g], buf, dwords * sizeof(uint32_t));
+      memcpy(cmd->a5xx_groups->group[g], buf, dwords * sizeof(uint32_t));
       cmd->state.a5xx_group_dwords[g] = dwords;
    } else {
       cmd->state.a5xx_group_dwords[g] = UINT32_MAX;
@@ -996,7 +996,7 @@ tu5_group_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
 #define TU5_GROUP_EMIT(g, known, draw_state, ...)                            \
    do {                                                                      \
-      uint32_t *_buf = cmd->a5xx_group_scratch;                              \
+      uint32_t *_buf = cmd->a5xx_groups->scratch;                              \
       struct tu_cs _scratch;                                                 \
       tu5_group_begin(cmd, &_scratch, _buf);                                 \
       {                                                                      \
@@ -1031,7 +1031,7 @@ tu5_emit_view_consts(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    for (unsigned stage = MESA_SHADER_VERTEX; stage <= MESA_SHADER_FRAGMENT;
         stage += MESA_SHADER_FRAGMENT - MESA_SHADER_VERTEX) {
       const struct tu_shader *shader = cmd->state.shaders[stage];
-      uint32_t loc = shader->const_state.a5xx.view_loc;
+      uint32_t loc = shader->const_state.a5xx->view_loc;
       const uint32_t consts[4] = { view };
 
       if (loc != ~0u && loc < shader->variant->constlen * 4)
