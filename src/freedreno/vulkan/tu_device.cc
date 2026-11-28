@@ -1664,7 +1664,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
          : VK_MAKE_VERSION(1, 0, VK_HEADER_VERSION);
    /* Adreno 5xx: what was made to work, see tu_get_features() */
    if (pdevice->info->chip == 5)
-      props->apiVersion = VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION);
+      props->apiVersion = VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION);
    /* to run the tests of an older version, as radv does */
    if (pdevice->info->chip == 5 && vk_get_version_override())
       props->apiVersion = vk_get_version_override();
