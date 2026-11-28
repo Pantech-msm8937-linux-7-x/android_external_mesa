@@ -562,7 +562,51 @@ emit_intrinsic_store_global(struct ir3_context *ctx, nir_intrinsic_instr *intr)
 static struct ir3_instruction *
 emit_intrinsic_atomic_global(struct ir3_context *ctx, nir_intrinsic_instr *intr)
 {
-   ir3_context_error(ctx, "Global atomics are unimplemented on A5xx\n");
+   struct ir3_builder *b = &ctx->build;
+   nir_atomic_op op = nir_intrinsic_atomic_op(intr);
+   type_t type = nir_atomic_op_type(op) == nir_type_int ? TYPE_S32 : TYPE_U32;
+
+   /* No atomics on raw addresses before a6xx: they go through a storage slot
+    * that the driver points at the whole GPU address space (which the iommu
+    * of a5xx keeps below 4 GB), the address being the offset in it.
+    */
+   if (!ctx->so->shader_options.global_uav) {
+      ir3_context_error(ctx, "Global atomics are unimplemented on A5xx\n");
+      return NULL;
+   }
+
+   struct ir3_instruction *lo, *hi;
+   int32_t imm = 0;
+   a5xx_global_addr(ctx, intr, 0, -1, &lo, &hi, &imm);
+   if (imm)
+      lo = ir3_ADD_U(b, lo, 0, create_immed(b, imm), 0);
+
+   struct ir3_instruction *ssbo =
+      create_immed(b, ctx->so->shader_options.global_uav_slot);
+   struct ir3_instruction *data = ir3_get_src(ctx, &intr->src[1])[0];
+   struct ir3_instruction *byte_offset =
+      ctx->compiler->is_64bit ? ir3_collect(b, lo, create_immed(b, 0)) : lo;
+   struct ir3_instruction *dword_offset =
+      ir3_SHR_B(b, lo, 0, create_immed(b, 2), 0);
+
+   if (op == nir_atomic_op_cmpxchg) {
+      /* data and compare, as for the storage buffers */
+      data = ir3_collect(b, ir3_get_src(ctx, &intr->src[2])[0], data);
+   }
+
+   struct ir3_instruction *atomic =
+      emit_atomic(b, op, ssbo, data, dword_offset, byte_offset);
+
+   atomic->cat6.iim_val = 1;
+   atomic->cat6.d = 4;
+   atomic->cat6.type = type;
+   atomic->barrier_class = IR3_BARRIER_BUFFER_W;
+   atomic->barrier_conflict = IR3_BARRIER_BUFFER_R | IR3_BARRIER_BUFFER_W;
+   ir3_reg_tie(atomic->dsts[0], atomic->srcs[2]);
+   array_insert(ctx->block, ctx->block->keeps, atomic);
+
+   ctx->so->uses_global_uav = true;
+   return atomic;
 }
 
 const struct ir3_context_funcs ir3_a4xx_funcs = {

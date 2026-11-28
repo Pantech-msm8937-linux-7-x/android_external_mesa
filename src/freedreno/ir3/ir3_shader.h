@@ -627,6 +627,13 @@ struct ir3_shader_options {
     */
    unsigned min_num_textures;
 
+   /* a5xx: the storage slot the driver binds to the whole GPU address space,
+    * through which the atomics on global memory go (pre-a6xx atomics only
+    * take a storage slot), if global_uav
+    */
+   bool global_uav;
+   unsigned global_uav_slot;
+
    struct ir3_shader_nir_options nir_options;
 
    /* Whether FRAG_RESULT_DATAi slots may be dynamically remapped by the driver.
@@ -857,6 +864,9 @@ struct ir3_shader_variant {
 
    /* do we have one or more SSBO instructions: */
    bool has_ssbo;
+
+   /* a5xx: whether the global atomics use ir3_shader_options::global_uav_slot */
+   bool uses_global_uav;
 
    /* Which bindless resources are used, for filling out sp_xs_config */
    bool bindless_tex;
