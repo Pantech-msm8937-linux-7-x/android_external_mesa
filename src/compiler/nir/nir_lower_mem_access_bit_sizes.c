@@ -446,6 +446,18 @@ lower_mem_store(nir_builder *b, nir_intrinsic_instr *intrin,
             nir_global_atomic(b, 32, chunk_offset, data,
                               .atomic_op = nir_atomic_op_ior);
             break;
+         case nir_intrinsic_store_global_offset: {
+            /* the offset is in bytes, see the offset_shift assert above */
+            nir_def *addr =
+               nir_iadd(b, intrin->src[1].ssa,
+                        nir_u2u64(b, nir_iadd_imm(b, chunk_offset,
+                                                  nir_intrinsic_base(intrin))));
+            nir_global_atomic(b, 32, addr, iand_mask,
+                              .atomic_op = nir_atomic_op_iand);
+            nir_global_atomic(b, 32, addr, data,
+                              .atomic_op = nir_atomic_op_ior);
+            break;
+         }
          case nir_intrinsic_store_shared:
             nir_shared_atomic(b, 32, chunk_offset, iand_mask,
                               .atomic_op = nir_atomic_op_iand,
