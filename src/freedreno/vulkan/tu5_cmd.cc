@@ -5214,6 +5214,13 @@ tu5_emit_blend(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                .format);
          bool is_int = util_format_is_pure_integer(format);
          bool has_alpha = util_format_has_alpha(format);
+         /* the logical operations are not for the float and sRGB formats,
+          * written as they are: without blending either, which logicOpEnable
+          * turns off for all (dEQP-VK.pipeline.monolithic.logic_op_na_formats.*)
+          */
+         const bool logic_op = dyn->cb.logic_op_enable &&
+                               !util_format_is_float(format) &&
+                               !util_format_is_srgb(format);
          uint32_t write_mask =
             (dyn->cb.color_write_enables & BITFIELD_BIT(i)) ? att->write_mask
                                                            : 0;
@@ -5235,25 +5242,25 @@ tu5_emit_blend(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
          control = A5XX_RB_MRT_CONTROL_COMPONENT_ENABLE(write_mask);
          if (is_int) {
             /* no blending, but the logical operations */
-            control |= A5XX_RB_MRT_CONTROL_ROP_CODE(rop) |
-                       COND(dyn->cb.logic_op_enable,
+            control |= A5XX_RB_MRT_CONTROL_ROP_CODE(logic_op ? rop : ROP_COPY) |
+                       COND(logic_op,
                             A5XX_RB_MRT_CONTROL_ROP_ENABLE);
-            if (dyn->cb.logic_op_enable &&
+            if (logic_op &&
                 dyn->cb.logic_op != VK_LOGIC_OP_CLEAR &&
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY &&
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY_INVERTED &&
                 dyn->cb.logic_op != VK_LOGIC_OP_SET)
                mrt_blend |= 1 << r;
          } else {
-            control |= A5XX_RB_MRT_CONTROL_ROP_CODE(rop) |
-                       COND(dyn->cb.logic_op_enable,
+            control |= A5XX_RB_MRT_CONTROL_ROP_CODE(logic_op ? rop : ROP_COPY) |
+                       COND(logic_op,
                             A5XX_RB_MRT_CONTROL_ROP_ENABLE);
             if (att->blend_enable && !dyn->cb.logic_op_enable) {
                control |= A5XX_RB_MRT_CONTROL_BLEND |
                           COND(has_alpha, A5XX_RB_MRT_CONTROL_BLEND2);
                mrt_blend |= 1 << r;
             }
-            if (dyn->cb.logic_op_enable &&
+            if (logic_op &&
                 dyn->cb.logic_op != VK_LOGIC_OP_CLEAR &&
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY &&
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY_INVERTED &&
