@@ -199,6 +199,13 @@ tu_physical_device_get_format_properties(
                  VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT |
                  VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_MINMAX_BIT;
 
+      /* Adreno 5xx: the min/max reduction of the integer formats takes the
+       * average (dEQP-VK.pipeline.monolithic.sampler.*_uint.min_reduce.*),
+       * nor does the specification ask for it
+       */
+      if (a5xx && vk_format_is_int(vk_format))
+         optimal &= ~VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_MINMAX_BIT;
+
       if (ycbcr_info) {
          /* This is supported on all YCbCr formats */
          optimal |= VK_FORMAT_FEATURE_2_MIDPOINT_CHROMA_SAMPLES_BIT;
