@@ -948,8 +948,7 @@ tu5_always_on_counter_reg(void)
    return REG_A5XX_RBBM_ALWAYSON_COUNTER_LO;
 }
 
-static void tu5_emit_mrt(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
-                         uint32_t layer);
+
 static void tu5_emit_zs(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                         uint32_t layer);
 
@@ -2842,13 +2841,33 @@ tu5_emit_zs_gmem(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t a)
    }
 }
 
-static void
+/* The colour attachment of the subpass drawn at the location r (the render
+ * target the outputs of that location go to): the attachments of a dynamic
+ * render pass can be at other locations
+ * (vkCmdSetRenderingAttachmentLocations), ~0 for none.
+ */
+static unsigned
+tu5_rt_attachment(const struct tu_cmd_buffer *cmd, unsigned r)
+{
+   const struct tu_subpass *subpass = cmd->state.subpass;
+   const uint8_t *map = cmd->vk.dynamic_graphics_state.cal.color_map;
+
+   for (unsigned i = 0; i < subpass->color_count; i++) {
+      if (map[i] == r)
+         return i;
+   }
+   return ~0u;
+}
+
+void
 tu5_emit_mrt(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t layer)
 {
    const struct tu_subpass *subpass = cmd->state.subpass;
    uint32_t components = 0, flags = 0;
 
-   for (unsigned i = 0; i < A5XX_MAX_RENDER_TARGETS; i++) {
+   for (unsigned r = 0; r < A5XX_MAX_RENDER_TARGETS; r++) {
+      const unsigned i = tu5_rt_attachment(cmd, r);
+
       if (i < subpass->color_count &&
           subpass->color_attachments[i].attachment != VK_ATTACHMENT_UNUSED) {
          uint32_t a = subpass->color_attachments[i].attachment;
@@ -2865,10 +2884,10 @@ tu5_emit_mrt(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t layer)
                                   iview->vk.base_array_layer + layer);
          }
 
-         flags |= tu5_emit_mrt_surf(cs, i, &surf);
-         components |= 0xf << (i * 4);
+         flags |= tu5_emit_mrt_surf(cs, r, &surf);
+         components |= 0xf << (r * 4);
       } else {
-         tu5_emit_mrt_surf(cs, i, NULL);
+         tu5_emit_mrt_surf(cs, r, NULL);
       }
    }
 
@@ -4166,6 +4185,13 @@ tu5_clear_attachments(struct tu_cmd_buffer *cmd, uint32_t attachment_count,
        */
       uint32_t a = rt >= 0 ? subpass->color_attachments[rt].attachment
                            : subpass->depth_stencil_attachment.attachment;
+      /* the target of the attachment is at its location (see
+       * tu5_rt_attachment()), if it has one
+       */
+      if (rt >= 0 &&
+          cmd->vk.dynamic_graphics_state.cal.color_map[rt] !=
+             MESA_VK_ATTACHMENT_UNUSED)
+         rt = cmd->vk.dynamic_graphics_state.cal.color_map[rt];
       /* A secondary command buffer need not know the framebuffer: there,
        * the layers are bound from the table of the primary one (at most
        * TU5_MAX_TABLE_LAYERS), and the window is the largest.
@@ -5165,9 +5191,11 @@ tu5_emit_blend(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    if (dyn->cb.logic_op_enable)
       rop = tu6_rop((VkLogicOp)dyn->cb.logic_op);
 
-   for (unsigned i = 0; i < A5XX_MAX_RENDER_TARGETS; i++) {
+   for (unsigned r = 0; r < A5XX_MAX_RENDER_TARGETS; r++) {
+      /* the attachment at the location r, see tu5_rt_attachment() */
+      const unsigned i = tu5_rt_attachment(cmd, r);
       const struct vk_color_blend_attachment_state *att =
-         &dyn->cb.attachments[i];
+         &dyn->cb.attachments[MIN2(i, A5XX_MAX_RENDER_TARGETS - 1)];
       uint32_t control = 0, blend_control = 0;
 
       if (i < subpass->color_count &&
@@ -5209,7 +5237,7 @@ tu5_emit_blend(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY &&
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY_INVERTED &&
                 dyn->cb.logic_op != VK_LOGIC_OP_SET)
-               mrt_blend |= 1 << i;
+               mrt_blend |= 1 << r;
          } else {
             control |= A5XX_RB_MRT_CONTROL_ROP_CODE(rop) |
                        COND(dyn->cb.logic_op_enable,
@@ -5217,21 +5245,21 @@ tu5_emit_blend(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
             if (att->blend_enable && !dyn->cb.logic_op_enable) {
                control |= A5XX_RB_MRT_CONTROL_BLEND |
                           COND(has_alpha, A5XX_RB_MRT_CONTROL_BLEND2);
-               mrt_blend |= 1 << i;
+               mrt_blend |= 1 << r;
             }
             if (dyn->cb.logic_op_enable &&
                 dyn->cb.logic_op != VK_LOGIC_OP_CLEAR &&
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY &&
                 dyn->cb.logic_op != VK_LOGIC_OP_COPY_INVERTED &&
                 dyn->cb.logic_op != VK_LOGIC_OP_SET)
-               mrt_blend |= 1 << i;
+               mrt_blend |= 1 << r;
          }
       }
 
-      OUT_PKT4(cs, REG_A5XX_RB_MRT_CONTROL(i), 1);
+      OUT_PKT4(cs, REG_A5XX_RB_MRT_CONTROL(r), 1);
       OUT_RING(cs, control);
 
-      OUT_PKT4(cs, REG_A5XX_RB_MRT_BLEND_CONTROL(i), 1);
+      OUT_PKT4(cs, REG_A5XX_RB_MRT_BLEND_CONTROL(r), 1);
       OUT_RING(cs, blend_control);
    }
 

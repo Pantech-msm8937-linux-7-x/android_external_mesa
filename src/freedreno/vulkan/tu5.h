@@ -53,6 +53,9 @@ void tu5_emit_flushes(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 /* The static registers, at the start of a command buffer */
 void tu5_init_hw(struct tu_cmd_buffer *cmd, struct tu_cs *cs);
 
+/* The colour targets of the subpass, at their locations */
+void tu5_emit_mrt(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t layer);
+
 /* The attachments of the subpass that starts, in the draw stream */
 void tu5_emit_subpass_begin(struct tu_cmd_buffer *cmd);
 

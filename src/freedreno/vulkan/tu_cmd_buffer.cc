@@ -7198,6 +7198,18 @@ template <chip CHIP>
 static void
 tu_emit_rendering_attachment_locations(struct tu_cmd_buffer *cmd)
 {
+   /* Adreno 5xx: the targets at their new locations, the colour cache
+    * flushed as on a6xx (the render target is part of its location)
+    */
+   if (tu_is_a5xx(cmd->device)) {
+      tu5_emit_flushes(cmd, &cmd->draw_cs,
+                       TU_CMD_FLAG_CCU_CLEAN_COLOR |
+                          TU_CMD_FLAG_CCU_INVALIDATE_COLOR |
+                          TU_CMD_FLAG_WAIT_FOR_IDLE);
+      tu5_emit_mrt(cmd, &cmd->draw_cs, 0);
+      return;
+   }
+
    tu6_emit_mrt<CHIP>(cmd, cmd->state.subpass, &cmd->draw_cs);
    tu6_emit_render_cntl<CHIP>(cmd, cmd->state.subpass, &cmd->draw_cs, false);
 
