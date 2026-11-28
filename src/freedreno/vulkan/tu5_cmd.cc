@@ -5224,6 +5224,12 @@ tu5_emit_blend(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
          uint32_t write_mask =
             (dyn->cb.color_write_enables & BITFIELD_BIT(i)) ? att->write_mask
                                                            : 0;
+         /* nor the targets the shader writes no output to, left as they
+          * are (dEQP-VK.api.fragment_shader_output.attachment_no_location.*)
+          */
+         if (!dual_src && fp &&
+             ir3_find_output_regid(fp, FRAG_RESULT_DATA0 + r) == regid(63, 0))
+            write_mask = 0;
 
          blend_control =
             A5XX_RB_MRT_BLEND_CONTROL_RGB_SRC_FACTOR(tu6_blend_factor(
