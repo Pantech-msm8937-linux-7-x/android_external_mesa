@@ -191,6 +191,17 @@ ir3_nir_should_vectorize_mem(unsigned align_mul, unsigned align_offset,
       return false;
    }
 
+   /* Adreno 5xx: ldg/stg of several dwords take them aligned to their size
+    * (dEQP-VK.ssbo.phys.layout.single_basic_type.scalar.lowp_ivec4)
+    */
+   if (compiler->gen == 5 &&
+       (low->intrinsic == nir_intrinsic_load_global ||
+        low->intrinsic == nir_intrinsic_load_global_constant ||
+        low->intrinsic == nir_intrinsic_store_global) &&
+       nir_combined_align(align_mul, align_offset) <
+          util_next_power_of_two(num_components) * byte_size)
+      return false;
+
    if ((low->intrinsic == nir_intrinsic_load_ssbo && low->def.bit_size == 8) ||
        (low->intrinsic == nir_intrinsic_store_ssbo &&
         low->src[0].ssa->bit_size == 8)) {
@@ -1335,8 +1346,11 @@ ir3_a5xx_mem_access_size_align(nir_intrinsic_op intrin, uint8_t bytes,
    case nir_intrinsic_load_ssbo:
    case nir_intrinsic_load_global:
    case nir_intrinsic_load_global_constant:
+   case nir_intrinsic_load_global_offset:
+   case nir_intrinsic_load_global_constant_offset:
    case nir_intrinsic_store_ssbo:
    case nir_intrinsic_store_global:
+   case nir_intrinsic_store_global_offset:
       break;
    default:
       return ir3_mem_access_size_align(intrin, bytes, bit_size, align,
@@ -1346,15 +1360,52 @@ ir3_a5xx_mem_access_size_align(nir_intrinsic_op intrin, uint8_t bytes,
 
    align = nir_combined_align(align, align_offset);
    bool store = intrin == nir_intrinsic_store_ssbo ||
-                intrin == nir_intrinsic_store_global;
+                intrin == nir_intrinsic_store_global ||
+                intrin == nir_intrinsic_store_global_offset;
    unsigned dwords = (store || align >= 4) ? bytes / 4 : DIV_ROUND_UP(bytes, 4);
+   unsigned max_dwords = 4;
+
+   /* ldg/stg of several dwords take them aligned to their size
+    * (dEQP-VK.ssbo.phys.layout.single_basic_type.scalar.lowp_ivec4)
+    */
+   if (intrin != nir_intrinsic_load_ssbo && intrin != nir_intrinsic_store_ssbo)
+      max_dwords = align >= 16 ? 4 : align >= 8 ? 2 : 1;
 
    return (nir_mem_access_size_align){
-      .num_components = CLAMP(dwords, 1, 4),
+      .num_components = CLAMP(dwords, 1, max_dwords),
       .bit_size = 32,
       .align = 4,
       .shift = nir_mem_access_shift_method_scalar,
    };
+}
+
+/* Adreno 5xx: the global accesses with their whole offset in bytes in the
+ * source, which nir_lower_mem_access_bit_sizes() expects
+ * (ir3_nir_lower_io_offsets() shifts them again)
+ */
+static bool
+unshift_global_offset(nir_builder *b, nir_intrinsic_instr *intr, void *data)
+{
+   if (intr->intrinsic != nir_intrinsic_load_global_offset &&
+       intr->intrinsic != nir_intrinsic_load_global_constant_offset &&
+       intr->intrinsic != nir_intrinsic_store_global_offset)
+      return false;
+
+   unsigned shift = nir_intrinsic_offset_shift(intr);
+   int base = nir_intrinsic_base(intr);
+   if (!shift && !base)
+      return false;
+
+   /* base too, which the lowering leaves out of the byte of the dword the
+    * smaller stores take (dEQP-VK.ssbo.phys.layout.random.8bit.scalar_types.17)
+    */
+   b->cursor = nir_before_instr(&intr->instr);
+   nir_src *off = nir_get_io_offset_src(intr);
+   nir_src_rewrite(off, nir_iadd_imm(b, nir_ishl_imm(b, off->ssa, shift),
+                                     (int64_t)base << shift));
+   nir_intrinsic_set_base(intr, 0);
+   nir_intrinsic_set_offset_shift(intr, 0);
+   return true;
 }
 
 static bool
@@ -1711,6 +1762,8 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so,
       .callback = ir3_mem_access_size_align,
    };
    if (so->compiler->gen == 5) {
+      progress |= OPT(s, nir_shader_intrinsics_pass, unshift_global_offset,
+                      nir_metadata_control_flow, NULL);
       mem_bit_size_options.callback = ir3_a5xx_mem_access_size_align;
       mem_bit_size_options.may_lower_unaligned_stores_to_atomics = true;
    }
