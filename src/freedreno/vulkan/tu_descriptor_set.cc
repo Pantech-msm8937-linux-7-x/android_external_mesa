@@ -1163,6 +1163,13 @@ write_buffer_descriptor_addr(const struct tu_device *device,
    uint64_t va = buffer_info->address;
    uint32_t range = buffer_info->range;
 
+   /* Adreno 5xx: the storage buffers are accessed a dword at a time (see
+    * ir3_a5xx_mem_access_size_align()), their size in dwords rounded up
+    * (dEQP-VK.ssbo.layout.random.8bit.*)
+    */
+   if (info->chip == 5)
+      range = MIN2(align64((uint64_t)range, 4), UINT32_MAX & ~3u);
+
    if (info->props.storage_16bit) {
       fdl6_buffer_view_init<CHIP>(dst, PIPE_FORMAT_R16_UINT, tu_swiz(X, Y, Z, W), va, range, 1, ssbo_emulation_mode);
       dst += FDL6_TEX_CONST_DWORDS;
