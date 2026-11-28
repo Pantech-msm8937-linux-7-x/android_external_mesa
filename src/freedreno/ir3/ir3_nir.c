@@ -1280,6 +1280,42 @@ ir3_mem_access_size_align(nir_intrinsic_op intrin, uint8_t bytes,
    };
 }
 
+/* Adreno 5xx: the storage buffers and the global memory are only accessed
+ * 32 bits at a time, the smaller stores being atomics on the dword
+ */
+static nir_mem_access_size_align
+ir3_a5xx_mem_access_size_align(nir_intrinsic_op intrin, uint8_t bytes,
+                               uint8_t bit_size, uint32_t align,
+                               uint32_t align_offset, bool offset_is_const,
+                               enum gl_access_qualifier access,
+                               const void *cb_data)
+{
+   switch (intrin) {
+   case nir_intrinsic_load_ssbo:
+   case nir_intrinsic_load_global:
+   case nir_intrinsic_load_global_constant:
+   case nir_intrinsic_store_ssbo:
+   case nir_intrinsic_store_global:
+      break;
+   default:
+      return ir3_mem_access_size_align(intrin, bytes, bit_size, align,
+                                       align_offset, offset_is_const, access,
+                                       cb_data);
+   }
+
+   align = nir_combined_align(align, align_offset);
+   bool store = intrin == nir_intrinsic_store_ssbo ||
+                intrin == nir_intrinsic_store_global;
+   unsigned dwords = (store || align >= 4) ? bytes / 4 : DIV_ROUND_UP(bytes, 4);
+
+   return (nir_mem_access_size_align){
+      .num_components = CLAMP(dwords, 1, 4),
+      .bit_size = 32,
+      .align = 4,
+      .shift = nir_mem_access_shift_method_scalar,
+   };
+}
+
 static bool
 atomic_supported(const nir_instr * instr, const void * data)
 {
@@ -1633,6 +1669,10 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so,
                nir_var_function_temp | nir_var_mem_ssbo | nir_var_mem_global,
       .callback = ir3_mem_access_size_align,
    };
+   if (so->compiler->gen == 5) {
+      mem_bit_size_options.callback = ir3_a5xx_mem_access_size_align;
+      mem_bit_size_options.may_lower_unaligned_stores_to_atomics = true;
+   }
 
    progress |= OPT(s, nir_lower_mem_access_bit_sizes, &mem_bit_size_options);
    progress |= OPT(s, ir3_nir_lower_64b_undef);
