@@ -3969,9 +3969,15 @@ tu5_resolve_image(struct tu_cmd_buffer *cmd, struct tu_image *src_image,
       struct tu5_surf src =
          tu5_image_surf(src_image, 0, src_format, info->srcSubresource.mipLevel,
                         info->srcSubresource.baseArrayLayer + i);
+      /* the slices of a 3D image from dstOffset.z
+       * (dEQP-VK.renderpasses.renderpass1.suballocation.multisample_resolve.resolve_into_3d_image.cmd_resolve_image_*)
+       */
+      uint32_t dst_layer = dst_image->vk.image_type == VK_IMAGE_TYPE_3D
+                              ? info->dstOffset.z + i
+                              : info->dstSubresource.baseArrayLayer + i;
       struct tu5_surf dst =
          tu5_image_surf(dst_image, 0, dst_format, info->dstSubresource.mipLevel,
-                        info->dstSubresource.baseArrayLayer + i);
+                        dst_layer);
 
       tu5_blit_rect(cmd, cs, &dst, rect, &src, info->srcOffset.x,
                     info->srcOffset.y, info->srcOffset.x + info->extent.width,
