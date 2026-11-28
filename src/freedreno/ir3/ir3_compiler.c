@@ -336,6 +336,12 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
        */
       if (compiler->gen == 5)
          compiler->max_const_compute = 256;
+      /* nor does a fragment shader read the constants past 256 vec4 right
+       * (the uniform buffers it reads as constants, dEQP-VK.spirv_assembly.
+       * instruction.graphics.8bit_storage.32struct_to_8struct.uniform_*_frag)
+       */
+      if (compiler->gen == 5)
+         compiler->max_const_frag = 256;
 
       /* Note: this will have to change if/when we support tess+GS on
        * earlier gen's.
