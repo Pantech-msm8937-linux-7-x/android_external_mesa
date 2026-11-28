@@ -723,6 +723,42 @@ lower_subgroup_of_one(nir_builder *b, nir_intrinsic_instr *intr, void *data)
    case nir_intrinsic_elect:
       def = nir_imm_true(b);
       break;
+   /* the value of the only invocation (the others, out of the subgroup, are
+    * undefined)
+    */
+   case nir_intrinsic_reduce:
+   case nir_intrinsic_inclusive_scan:
+   case nir_intrinsic_shuffle:
+   case nir_intrinsic_shuffle_xor:
+   case nir_intrinsic_shuffle_up:
+   case nir_intrinsic_shuffle_down:
+   case nir_intrinsic_rotate:
+   case nir_intrinsic_read_invocation:
+   case nir_intrinsic_read_first_invocation:
+   case nir_intrinsic_quad_broadcast:
+   case nir_intrinsic_quad_swap_horizontal:
+   case nir_intrinsic_quad_swap_vertical:
+   case nir_intrinsic_quad_swap_diagonal:
+      def = intr->src[0].ssa;
+      break;
+   case nir_intrinsic_exclusive_scan: {
+      nir_op op = (nir_op)nir_intrinsic_reduction_op(intr);
+      unsigned bit_size = intr->def.bit_size;
+      nir_const_value id = nir_alu_binop_identity(op, bit_size);
+      nir_def *imm = nir_build_imm(b, 1, bit_size, &id);
+      def = intr->def.num_components == 1 ? imm :
+            nir_replicate(b, imm, intr->def.num_components);
+      break;
+   }
+   case nir_intrinsic_ballot: {
+      /* the bit of the only invocation */
+      nir_def *bit = nir_b2iN(b, intr->src[0].ssa, intr->def.bit_size);
+      nir_def *comps[4];
+      for (unsigned i = 0; i < intr->def.num_components; i++)
+         comps[i] = i ? nir_imm_intN_t(b, 0, intr->def.bit_size) : bit;
+      def = nir_vec(b, comps, intr->def.num_components);
+      break;
+   }
    case nir_intrinsic_load_subgroup_id: {
       /* this runs after the system values of compute have been lowered:
        * the index of the invocation in the workgroup, from its id
@@ -1149,6 +1185,11 @@ ir3_nir_post_finalize(struct ir3_shader *shader)
          OPT(s, ir3_nir_lower_subgroups_of_one);
 
       OPT(s, nir_lower_subgroups, &options);
+      /* and what nir_lower_subgroups made of the scans (the invocation
+       * index of the subgroup masks)
+       */
+      if (compiler->gen == 5)
+         OPT(s, ir3_nir_lower_subgroups_of_one);
       OPT(s, ir3_nir_lower_shuffle, shader);
    }
 
