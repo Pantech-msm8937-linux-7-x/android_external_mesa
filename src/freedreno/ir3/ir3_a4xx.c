@@ -457,11 +457,15 @@ a5xx_global_addr(struct ir3_context *ctx, nir_intrinsic_instr *intr,
    } else {
       lo = base[0];
    }
+   /* in bytes, as the immediate offset of ldg/stg */
    int64_t const_off = 0;
 
    if (off_src_idx >= 0) {
       unsigned shift = nir_intrinsic_offset_shift(intr);
-      const_off = nir_intrinsic_base(intr);
+      /* base is in the units of the offset too
+       * (dEQP-VK.ssbo.phys.layout.single_basic_type.scalar.lowp_ivec4)
+       */
+      const_off = (int64_t)nir_intrinsic_base(intr) << shift;
 
       if (nir_src_is_const(intr->src[off_src_idx])) {
          const_off += (int64_t)nir_src_as_uint(intr->src[off_src_idx]) << shift;
