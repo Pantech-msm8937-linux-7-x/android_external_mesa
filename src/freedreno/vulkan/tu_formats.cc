@@ -243,14 +243,20 @@ tu_physical_device_get_format_properties(
        * Don't bother supporting that unformatted z/s access, either, since
        * x8_d24 fails and it seems like an unintended corner of the spec.
        */
-      if (!vk_format_is_depth_or_stencil(vk_format)) {
+      /* Adreno 5xx: the alpha of A8 is not stored (no SPIR-V format has it,
+       * dEQP-VK.image.store.without_format.*.a8_unorm)
+       */
+      const bool storage = !(a5xx && vk_format == VK_FORMAT_A8_UNORM_KHR);
+
+      if (!vk_format_is_depth_or_stencil(vk_format) && storage) {
          optimal |= VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_2_STORAGE_READ_WITHOUT_FORMAT_BIT |
                     VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT;
       }
 
-      buffer |= VK_FORMAT_FEATURE_2_STORAGE_TEXEL_BUFFER_BIT |
-                VK_FORMAT_FEATURE_2_STORAGE_READ_WITHOUT_FORMAT_BIT |
-                VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT;
+      if (storage)
+         buffer |= VK_FORMAT_FEATURE_2_STORAGE_TEXEL_BUFFER_BIT |
+                   VK_FORMAT_FEATURE_2_STORAGE_READ_WITHOUT_FORMAT_BIT |
+                   VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT;
 
       /* TODO: The blob also exposes these for R16G16_UINT/R16G16_SINT/
        * R32G32_SFLOAT/R32G32B32A32_SFLOAT, but we don't have any tests for those.
