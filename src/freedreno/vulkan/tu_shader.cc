@@ -1745,6 +1745,8 @@ tu5_vs_uses_ibo(nir_shader *shader)
             case nir_intrinsic_image_deref_atomic_swap:
             case nir_intrinsic_image_deref_size:
             case nir_intrinsic_image_deref_samples:
+            case nir_intrinsic_global_atomic:
+            case nir_intrinsic_global_atomic_swap:
                return true;
             default:
                break;
@@ -1907,8 +1909,9 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
       unsigned count = tu5_vs_ibo_count(shader, layout);
       if (count > TU5_GFX_IBO_SLOTS)
          mesa_loge("a5xx: %u storage slots in a vertex shader", count);
+      /* below the slot of the global atomics, see TU5_GLOBAL_UAV_SLOT */
       tu_shader->a5xx->vs_ibo_base =
-         TU5_GFX_IBO_SLOTS - MIN2(count, TU5_GFX_IBO_SLOTS);
+         TU5_GLOBAL_UAV_SLOT - MIN2(count, TU5_GLOBAL_UAV_SLOT);
    }
 
    if (tu_is_a5xx(dev))
@@ -4150,6 +4153,8 @@ tu_shader_create(struct tu_device *dev,
       .const_allocs = const_allocs,
       .min_num_textures = tu_is_a5xx(dev) ?
          shader->a5xx->count[TU5_DESC_TEXTURE] : 0,
+      .global_uav = tu_is_a5xx(dev),
+      .global_uav_slot = TU5_GLOBAL_UAV_SLOT,
       .nir_options = nir_options,
    };
 

@@ -482,7 +482,7 @@ tu5_emit_ssbos(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    unsigned count = map->count[TU5_DESC_SSBO];
    enum a4xx_state_block sb;
 
-   if (!count)
+   if (!count && !shader->variant->uses_global_uav)
       return;
 
    switch (shader->variant->type) {
@@ -499,6 +499,33 @@ tu5_emit_ssbos(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    default:
       return;
    }
+
+   /* the slot of the global atomics: the whole address space, from 0 */
+   if (shader->variant->uses_global_uav) {
+      OUT_PKT7(cs, CP_LOAD_STATE4, 3 + 2);
+      OUT_RING(cs, CP_LOAD_STATE4_0_DST_OFF(TU5_GLOBAL_UAV_SLOT) |
+                      CP_LOAD_STATE4_0_STATE_SRC(SS4_DIRECT) |
+                      CP_LOAD_STATE4_0_STATE_BLOCK(sb) |
+                      CP_LOAD_STATE4_0_NUM_UNIT(1));
+      OUT_RING(cs, CP_LOAD_STATE4_1_STATE_TYPE(ST4_CONSTANTS) |
+                      CP_LOAD_STATE4_1_EXT_SRC_ADDR(0));
+      OUT_RING(cs, CP_LOAD_STATE4_2_EXT_SRC_ADDR_HI(0));
+      OUT_RING(cs, A5XX_SSBO_1_0_WIDTH(0xffff));
+      OUT_RING(cs, A5XX_SSBO_1_1_HEIGHT(0xffff));
+
+      OUT_PKT7(cs, CP_LOAD_STATE4, 3 + 2);
+      OUT_RING(cs, CP_LOAD_STATE4_0_DST_OFF(TU5_GLOBAL_UAV_SLOT) |
+                      CP_LOAD_STATE4_0_STATE_SRC(SS4_DIRECT) |
+                      CP_LOAD_STATE4_0_STATE_BLOCK(sb) |
+                      CP_LOAD_STATE4_0_NUM_UNIT(1));
+      OUT_RING(cs, CP_LOAD_STATE4_1_STATE_TYPE(ST4_UBO) |
+                      CP_LOAD_STATE4_1_EXT_SRC_ADDR(0));
+      OUT_RING(cs, CP_LOAD_STATE4_2_EXT_SRC_ADDR_HI(0));
+      tu_cs_emit_qw(cs, 0);
+   }
+
+   if (!count)
+      return;
 
    const unsigned slot_base = tu5_ibo_slot_base(shader);
    uint64_t va[TU5_MAX_SSBOS];

@@ -423,6 +423,8 @@ get_device_extensions(const struct tu_physical_device *device,
 
       *ext = (struct vk_device_extension_table) { .table = {
          .KHR_bind_memory2 = true,
+         /* ldg/stg, and the atomics through TU5_GLOBAL_UAV_SLOT */
+         .KHR_buffer_device_address = true,
          .KHR_create_renderpass2 = true,
          .KHR_dedicated_allocation = true,
          .KHR_depth_stencil_resolve = true,
@@ -1093,6 +1095,7 @@ tu_get_features(struct tu_physical_device *pdevice,
       features->shaderSubgroupRotate = all.shaderSubgroupRotate;
       features->shaderSubgroupRotateClustered = all.shaderSubgroupRotateClustered;
       features->indexTypeUint8 = all.indexTypeUint8;
+      features->bufferDeviceAddress = all.bufferDeviceAddress;
       /* VK_KHR_line_rasterization is to have one of the line modes: the
        * rectangular lines are those drawn by default (strictLines), which
        * the rasterization tests pass
@@ -1629,7 +1632,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
          : VK_MAKE_VERSION(1, 0, VK_HEADER_VERSION);
    /* Adreno 5xx: what was made to work, see tu_get_features() */
    if (pdevice->info->chip == 5)
-      props->apiVersion = VK_MAKE_VERSION(1, 2, VK_HEADER_VERSION);
+      props->apiVersion = VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION);
    /* Adreno 5xx: a shader numbers what it uses, see struct tu5_desc_map.
     * TODO: storage buffers and storage images
     */

@@ -59,6 +59,10 @@ struct tu_push_constant_range
  * tu5_desc_map::vs_ibo_base). The hardware has at least that many.
  */
 #define TU5_GFX_IBO_SLOTS 32
+/* The last storage slot of every stage points at the whole GPU address space
+ * (below 4 GB on a5xx), for the atomics on buffer device addresses
+ */
+#define TU5_GLOBAL_UAV_SLOT (TU5_GFX_IBO_SLOTS - 1)
 
 enum tu5_desc_kind {
    TU5_DESC_TEXTURE,
