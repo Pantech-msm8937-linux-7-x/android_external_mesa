@@ -557,6 +557,17 @@ get_device_extensions(const struct tu_physical_device *device,
        * tu5_lower_txf_3d_bounds()
        */
       ext->EXT_image_robustness = all.EXT_image_robustness;
+
+      /* Vulkan 1.4: the storage buffers of 8 and 16 bits accessed 32 bits
+       * at a time (see ir3_a5xx_mem_access_size_align())
+       */
+      ext->KHR_8bit_storage = true;
+      ext->KHR_16bit_storage = true;
+      ext->KHR_shader_float16_int8 = all.KHR_shader_float16_int8;
+      ext->KHR_dynamic_rendering_local_read = all.KHR_dynamic_rendering_local_read;
+      ext->KHR_load_store_op_none = all.KHR_load_store_op_none;
+      ext->KHR_shader_float_controls2 = all.KHR_shader_float_controls2;
+      ext->EXT_pipeline_robustness = all.EXT_pipeline_robustness;
    }
 }
 
@@ -1148,6 +1159,19 @@ tu_get_features(struct tu_physical_device *pdevice,
       features->borderColorSwizzleFromImage = all.borderColorSwizzleFromImage;
       features->robustImageAccess = all.robustImageAccess;
 
+      /* what Vulkan 1.4 requires */
+      features->drawIndirectFirstInstance = true;
+      features->shaderStorageImageExtendedFormats = true;
+      features->storageBuffer8BitAccess = true;
+      features->storageBuffer16BitAccess = true;
+      features->shaderInt8 = all.shaderInt8;
+      features->shaderUniformTexelBufferArrayDynamicIndexing = true;
+      features->shaderStorageTexelBufferArrayDynamicIndexing = true;
+      features->dynamicRenderingLocalRead = all.dynamicRenderingLocalRead;
+      features->bresenhamLines = all.bresenhamLines;
+      features->pipelineRobustness = all.pipelineRobustness;
+      features->shaderFloatControls2 = all.shaderFloatControls2;
+
 
       features->robustBufferAccess = true;
       features->fullDrawIndexUint32 = true;
@@ -1240,8 +1264,16 @@ tu_get_physical_device_properties_1_1(struct tu_physical_device *pdevice,
       p->subgroupSupportedStages = VK_SHADER_STAGE_COMPUTE_BIT |
                                    VK_SHADER_STAGE_FRAGMENT_BIT |
                                    VK_SHADER_STAGE_VERTEX_BIT;
+      /* trivial with one invocation, see lower_subgroup_of_one() */
       p->subgroupSupportedOperations = VK_SUBGROUP_FEATURE_BASIC_BIT |
-                                       VK_SUBGROUP_FEATURE_VOTE_BIT;
+                                       VK_SUBGROUP_FEATURE_VOTE_BIT |
+                                       VK_SUBGROUP_FEATURE_ARITHMETIC_BIT |
+                                       VK_SUBGROUP_FEATURE_BALLOT_BIT |
+                                       VK_SUBGROUP_FEATURE_SHUFFLE_BIT |
+                                       VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT |
+                                       VK_SUBGROUP_FEATURE_CLUSTERED_BIT |
+                                       VK_SUBGROUP_FEATURE_ROTATE_BIT_KHR |
+                                       VK_SUBGROUP_FEATURE_ROTATE_CLUSTERED_BIT_KHR;
    }
 
    p->pointClippingBehavior = VK_POINT_CLIPPING_BEHAVIOR_ALL_CLIP_PLANES;
@@ -1658,17 +1690,17 @@ tu_get_properties(struct tu_physical_device *pdevice,
        * the hardware, which a shader using them all at their limits would
        * overflow (see tu5_desc_base()).
        */
-      props->maxPerStageResources = 158;
+      props->maxPerStageResources = 200; /* Vulkan 1.4 */
       props->maxDescriptorSetSamplers = 96;
       /* as in the stock driver */
       props->maxDescriptorSetSampledImages = 6 * TU5_MAX_TEXTURES;
-      props->maxDescriptorSetUniformBuffers = 84;
+      props->maxDescriptorSetUniformBuffers = 90; /* Vulkan 1.4 */
       props->maxDescriptorSetUniformBuffersDynamic =
          MIN2(MAX_DYNAMIC_UNIFORM_BUFFERS, TU5_MAX_UBOS - 2);
-      props->maxDescriptorSetStorageBuffers = 2 * TU5_MAX_SSBOS;
+      props->maxDescriptorSetStorageBuffers = 96; /* Vulkan 1.4 */
       props->maxDescriptorSetStorageBuffersDynamic =
          MIN2(MAX_DYNAMIC_STORAGE_BUFFERS, TU5_MAX_SSBOS);
-      props->maxDescriptorSetStorageImages = 24;
+      props->maxDescriptorSetStorageImages = 144; /* Vulkan 1.4 */
       /* as in the stock driver: more do not fit (vt28) */
       props->maxComputeWorkGroupInvocations = 512;
       props->maxComputeWorkGroupSize[0] = 512;
@@ -2136,7 +2168,7 @@ tu_physical_device_init(struct tu_physical_device *device,
       device->dev_info = info;
       device->info = &device->dev_info;
       device->usable_gmem_size_gmem = device->gmem_size;
-      device->usable_sets = 4;
+      device->usable_sets = 7; /* Vulkan 1.4 */
       device->reserved_set_idx = -1;
       break;
    default:
